@@ -11,6 +11,8 @@
 
 ### 🌐 在线体验
 **[http://112.126.74.91:8888/](http://112.126.74.91:8888/)** - 立即体验，无需安装
+<img width="2552" height="1314" alt="FR" src="https://github.com/user-attachments/assets/4144584b-ca15-4e6c-b810-7cd729ddd7a9" />
+
 
 *© 2025 File-Rocket • Designed for Speed*
 
