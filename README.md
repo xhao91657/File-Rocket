@@ -139,6 +139,7 @@ A: 这是网络问题导致无法拉取基础镜像。请参考上文的 **"编�
 
 - **GitHub**: [Lihu-PR](https://github.com/Lihu-PR)
 - **Docker Hub**: [lihupr](https://hub.docker.com/u/lihupr)
+- **哩虎的技术博客**: [lihu.site](https://lihu.site/)  
 
 ---
 
