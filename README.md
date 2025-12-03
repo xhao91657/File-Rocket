@@ -44,12 +44,14 @@ Docker安装及配置教程：[哩虎的技术博客-Docker安装及配置](http
 #### 🏠 ARM64 设备 (OpenWrt / 树莓派 / 电视盒子)
 ```bash
 docker run -d --name file-rocket --restart unless-stopped -p 3000:3000 --memory=128m --cpus=0.3 lihupr/file-rocket:arm64
-```
+```  
+视频教程制作中...
 
 #### 💻 AMD64 设备 (Windows / Linux PC / 云服务器)
 ```bash
 docker run -d --name file-rocket --restart unless-stopped -p 3000:3000 lihupr/file-rocket:latest
-```
+```  
+视频教程：[ARM64平台部署视频教程](https://b23.tv/nlUlzcT)
 
 > **访问地址**：打开浏览器访问 `http://设备IP:3000`
 
