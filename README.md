@@ -51,7 +51,7 @@ docker run -d --name file-rocket --restart unless-stopped -p 3000:3000 --memory=
 ```bash
 docker run -d --name file-rocket --restart unless-stopped -p 3000:3000 lihupr/file-rocket:latest
 ```  
-视频教程：[ARM64平台部署视频教程](https://b23.tv/nlUlzcT)
+视频教程：[AMD64平台部署视频教程](https://b23.tv/nlUlzcT)
 
 > **访问地址**：打开浏览器访问 `http://设备IP:3000`
 
