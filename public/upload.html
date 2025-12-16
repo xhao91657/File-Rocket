@@ -46,6 +46,45 @@
                             <span class="file-size" id="fileSize">0 MB</span>
                         </div>
                     </div>
+                    
+                    <!-- 传输模式选择 -->
+                    <div class="transfer-mode-selector" style="width: 100%; margin: 30px 0;">
+                        <h3 style="margin-bottom: 15px; font-size: 1.1rem; color: var(--text-main);">选择传输方式</h3>
+                        
+                        <div class="mode-option" id="memoryModeOption" style="display: none;">
+                            <input type="radio" name="transferMode" value="memory" id="memoryMode" checked>
+                            <label for="memoryMode">
+                                <div class="mode-icon">⚡</div>
+                                <div class="mode-info">
+                                    <strong>内存流式传输</strong>
+                                    <span>实时中继，双方需同时在线</span>
+                                </div>
+                            </label>
+                        </div>
+                        
+                        <div class="mode-option" id="storageModeOption" style="display: none;">
+                            <input type="radio" name="transferMode" value="storage" id="storageMode">
+                            <label for="storageMode">
+                                <div class="mode-icon">💾</div>
+                                <div class="mode-info">
+                                    <strong>服务器存储中转</strong>
+                                    <span id="storageModeDesc">文件暂存24小时，支持异步下载</span>
+                                </div>
+                            </label>
+                        </div>
+                        
+                        <div class="mode-option" id="p2pModeOption" style="display: none;">
+                            <input type="radio" name="transferMode" value="p2p" id="p2pMode">
+                            <label for="p2pMode">
+                                <div class="mode-icon">🔗</div>
+                                <div class="mode-info">
+                                    <strong>P2P 直连传输</strong>
+                                    <span>点对点连接，无需服务器中转</span>
+                                </div>
+                            </label>
+                        </div>
+                    </div>
+                    
                     <button class="btn-primary" id="generateCodeBtn" onclick="generateCode()">
                         生成取件码
                     </button>
@@ -56,7 +95,7 @@
                     <div class="pickup-code-display">
                         <p style="color: var(--text-sub); margin-bottom: 10px;">您的专属取件码</p>
                         <div class="pickup-code" id="pickupCode">----</div>
-                        <p class="code-hint" style="font-size: 0.9rem; color: var(--text-sub);">请将此码分享给接收方 (30分钟有效)</p>
+                        <p class="code-hint" id="codeHint" style="font-size: 0.9rem; color: var(--text-sub);">请将此码分享给接收方 (30分钟有效)</p>
                     </div>
                     
                     <div class="status-indicator" id="statusIndicator">
@@ -93,6 +132,7 @@
     </div>
 
     <script src="/socket.io/socket.io.js"></script>
+    <script src="p2p-helper.js"></script>
     <script src="upload.js"></script>
 </body>
 </html>

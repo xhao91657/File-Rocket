@@ -3,6 +3,10 @@ const http = require('http');
 const socketIo = require('socket.io');
 const multer = require('multer');
 const path = require('path');
+const fs = require('fs');
+const crypto = require('crypto');
+const adminMiddleware = require('./admin-middleware');
+const RateLimiter = require('./rate-limiter');
 
 const app = express();
 const server = http.createServer(app);
@@ -24,9 +28,58 @@ const PORT = process.env.PORT || 3000;
 // 存储活跃的传输会话
 const activeSessions = new Map();
 
+// 存储文件的会话（服务器存储模式）
+const storedFileSessions = new Map();
+
+// 统计数据
+let stats = {
+  todayTransfers: 0,
+  totalTransfers: 0,
+  lastResetDate: new Date().toDateString()
+};
+
+// 速率限制器
+const loginLimiter = new RateLimiter(5, 300000); // 5次/5分钟
+const codeGenerationLimiter = new RateLimiter(20, 60000); // 20次/分钟
+const codeAttemptLimiter = new RateLimiter(10, 60000); // 10次/分钟
+
+// 确保文件存储目录存在
+const config = adminMiddleware.loadConfig();
+if (config && config.storageConfig) {
+  const uploadDir = path.resolve(config.storageConfig.uploadDir);
+  if (!fs.existsSync(uploadDir)) {
+    fs.mkdirSync(uploadDir, { recursive: true });
+  }
+}
+
 // 配置静态文件服务
 app.use(express.static('public'));
 app.use(express.json());
+
+// 配置 Multer 用于文件上传
+const storage = multer.diskStorage({
+  destination: (req, file, cb) => {
+    const config = adminMiddleware.loadConfig();
+    const uploadDir = path.resolve(config.storageConfig.uploadDir);
+    cb(null, uploadDir);
+  },
+  filename: (req, file, cb) => {
+    const uniqueName = crypto.randomBytes(16).toString('hex') + path.extname(file.originalname);
+    cb(null, uniqueName);
+  }
+});
+
+const upload = multer({ 
+  storage: storage,
+  fileFilter: (req, file, cb) => {
+    // 记录上传开始时间
+    req.uploadStartTime = Date.now();
+    cb(null, true);
+  },
+  limits: {
+    fileSize: 10 * 1024 * 1024 * 1024 // 10GB 限制
+  }
+});
 
 // 生成4位随机取件码（数字+大写字母）
 function generatePickupCode() {
@@ -48,6 +101,16 @@ io.on('connection', (socket) => {
 
   // 创建文件传输会话
   socket.on('create-session', (callback) => {
+    const clientIP = socket.handshake.address;
+    
+    // 速率限制
+    if (!codeGenerationLimiter.check(clientIP)) {
+      return callback({ 
+        success: false, 
+        message: '操作过于频繁，请稍后再试' 
+      });
+    }
+    
     const pickupCode = generatePickupCode();
     activeSessions.set(pickupCode, {
       senderId: socket.id,
@@ -67,6 +130,16 @@ io.on('connection', (socket) => {
   // 加入接收会话
   socket.on('join-session', (data, callback) => {
     const { pickupCode } = data;
+    const clientIP = socket.handshake.address;
+    
+    // 速率限制（防止暴力破解取件码）
+    if (!codeAttemptLimiter.check(clientIP)) {
+      return callback({ 
+        success: false, 
+        message: '尝试次数过多，请稍后再试' 
+      });
+    }
+    
     const session = activeSessions.get(pickupCode);
     
     if (!session) {
@@ -205,6 +278,10 @@ io.on('connection', (socket) => {
       session.senderSocket.emit('transfer-complete', { pickupCode });
       console.log(`传输全部完成: ${pickupCode}`);
       
+      // 更新统计
+      stats.todayTransfers++;
+      stats.totalTransfers++;
+      
       // 清理会话
       setTimeout(() => {
         activeSessions.delete(pickupCode);
@@ -242,6 +319,91 @@ io.on('connection', (socket) => {
       });
     } else {
       console.log(`[${pickupCode}] transfer-speed验证失败: session存在=${!!session}, receiverId匹配=${session?.receiverId === socket.id}`);
+    }
+  });
+
+  // ========== P2P 信令中继 ==========
+  
+  // P2P NAT 信息交换
+  // 请求NAT信息（接收端主动请求）
+  socket.on('request-nat-info', (data) => {
+    const { pickupCode } = data;
+    const session = activeSessions.get(pickupCode);
+    
+    if (session && session.receiverId === socket.id) {
+      // 如果发送端的NAT信息已经存在，立即发送给接收端
+      if (session.senderNAT) {
+        socket.emit('p2p-nat-info', { 
+          pickupCode, 
+          natType: session.senderNAT, 
+          role: 'sender' 
+        });
+        console.log(`[${pickupCode}] 接收端请求NAT信息，发送已存储的发送端NAT`);
+      }
+    }
+  });
+  
+  socket.on('p2p-nat-info', (data) => {
+    const { pickupCode, natType, role } = data;
+    const session = activeSessions.get(pickupCode);
+    
+    if (session) {
+      // 存储 NAT 信息
+      if (role === 'sender') {
+        session.senderNAT = natType;
+        console.log(`[${pickupCode}] 存储发送端NAT信息:`, natType.type);
+        // 转发给接收方
+        if (session.receiverSocket) {
+          session.receiverSocket.emit('p2p-nat-info', { pickupCode, natType, role: 'sender' });
+          console.log(`[${pickupCode}] 转发发送端NAT信息到接收端`);
+        }
+      } else if (role === 'receiver') {
+        session.receiverNAT = natType;
+        console.log(`[${pickupCode}] 存储接收端NAT信息:`, natType.type);
+        // 转发给发送方
+        if (session.senderSocket) {
+          session.senderSocket.emit('p2p-nat-info', { pickupCode, natType, role: 'receiver' });
+        }
+      }
+      
+      console.log(`[${pickupCode}] 收到${role}的NAT信息: ${natType.type}`);
+    }
+  });
+  
+  // P2P Offer
+  socket.on('p2p-offer', (data) => {
+    const { pickupCode, offer } = data;
+    const session = activeSessions.get(pickupCode);
+    
+    if (session && session.senderId === socket.id && session.receiverSocket) {
+      session.receiverSocket.emit('p2p-offer', { pickupCode, offer });
+      console.log(`[${pickupCode}] 转发P2P Offer`);
+    }
+  });
+  
+  // P2P Answer
+  socket.on('p2p-answer', (data) => {
+    const { pickupCode, answer } = data;
+    const session = activeSessions.get(pickupCode);
+    
+    if (session && session.receiverId === socket.id && session.senderSocket) {
+      session.senderSocket.emit('p2p-answer', { pickupCode, answer });
+      console.log(`[${pickupCode}] 转发P2P Answer`);
+    }
+  });
+  
+  // P2P ICE候选
+  socket.on('p2p-ice-candidate', (data) => {
+    const { pickupCode, candidate } = data;
+    const session = activeSessions.get(pickupCode);
+    
+    if (session) {
+      // 转发给对方
+      if (session.senderId === socket.id && session.receiverSocket) {
+        session.receiverSocket.emit('p2p-ice-candidate', { pickupCode, candidate });
+      } else if (session.receiverId === socket.id && session.senderSocket) {
+        session.senderSocket.emit('p2p-ice-candidate', { pickupCode, candidate });
+      }
     }
   });
 
@@ -286,10 +448,613 @@ app.get('/health', (req, res) => {
   });
 });
 
+// ========== 管理员 API ==========
+
+// 管理员登录
+app.post('/api/admin/login', (req, res) => {
+  const { password } = req.body;
+  const clientIP = req.ip || req.connection.remoteAddress;
+  
+  if (!password) {
+    return res.status(400).json({ success: false, message: '请输入密码' });
+  }
+  
+  // 速率限制
+  if (!loginLimiter.check(clientIP)) {
+    return res.status(429).json({ 
+      success: false, 
+      message: '登录尝试次数过多，请稍后再试' 
+    });
+  }
+  
+  if (adminMiddleware.verifyAdminPassword(password)) {
+    const token = adminMiddleware.createAdminSession();
+    loginLimiter.reset(clientIP); // 成功后重置限制
+    res.json({ success: true, token });
+  } else {
+    res.status(401).json({ success: false, message: '密码错误' });
+  }
+});
+
+// 获取管理员配置
+app.get('/api/admin/config', adminMiddleware.requireAdmin, (req, res) => {
+  const config = adminMiddleware.loadConfig();
+  
+  // 重置每日统计
+  const today = new Date().toDateString();
+  if (stats.lastResetDate !== today) {
+    stats.todayTransfers = 0;
+    stats.lastResetDate = today;
+  }
+  
+  // 计算存储文件数量
+  let storedFiles = 0;
+  if (config && config.features.serverStorage) {
+    try {
+      const uploadDir = path.resolve(config.storageConfig.uploadDir);
+      if (fs.existsSync(uploadDir)) {
+        storedFiles = fs.readdirSync(uploadDir).length;
+      }
+    } catch (error) {
+      console.error('读取存储目录失败:', error);
+    }
+  }
+  
+  res.json({
+    success: true,
+    features: config.features,
+    storageConfig: config.storageConfig,
+    stats: {
+      activeSessions: activeSessions.size,
+      todayTransfers: stats.todayTransfers,
+      storedFiles: storedFiles
+    }
+  });
+});
+
+// 更新存储配置
+app.put('/api/admin/storage-config', adminMiddleware.requireAdmin, (req, res) => {
+  const { fileRetentionHours, deleteOnDownload } = req.body;
+  
+  const config = adminMiddleware.loadConfig();
+  if (!config) {
+    return res.status(500).json({ success: false, message: '加载配置失败' });
+  }
+  
+  if (fileRetentionHours !== undefined) {
+    config.storageConfig.fileRetentionHours = fileRetentionHours;
+  }
+  
+  if (deleteOnDownload !== undefined) {
+    config.storageConfig.deleteOnDownload = deleteOnDownload;
+  }
+  
+  if (adminMiddleware.saveConfig(config)) {
+    res.json({ success: true, message: '存储配置已更新' });
+  } else {
+    res.status(500).json({ success: false, message: '配置保存失败' });
+  }
+});
+
+// 获取磁盘空间和文件列表
+app.get('/api/admin/files', adminMiddleware.requireAdmin, (req, res) => {
+  const config = adminMiddleware.loadConfig();
+  const uploadDir = path.resolve(config.storageConfig.uploadDir);
+  
+  try {
+    // 获取磁盘空间信息（专为Linux优化：支持OpenWrt ARM64和Ubuntu AMD64）
+    let diskSpace = { total: 0, free: 0, used: 0 };
+    
+    const { execSync } = require('child_process');
+    
+    try {
+      // 确保上传目录存在
+      if (!fs.existsSync(uploadDir)) {
+        fs.mkdirSync(uploadDir, { recursive: true });
+      }
+      
+      // Linux/Unix: 使用 df 命令获取磁盘空间
+      // 支持所有架构：x86_64, amd64, aarch64, arm64, armv7l等
+      // 支持所有发行版：Ubuntu, Debian, OpenWrt, Alpine等
+      
+      let dfOutput = '';
+      let useBytesUnit = false;
+      
+      // 优先尝试 -B1 参数（字节单位，精确但不是所有系统都支持）
+      try {
+        dfOutput = execSync(`df -B1 "${uploadDir}"`, { 
+          encoding: 'utf8',
+          shell: '/bin/sh',
+          timeout: 5000
+        }).toString();
+        useBytesUnit = true;
+      } catch (dfError) {
+        // 如果 -B1 不支持（如某些 BusyBox 版本），使用 -k（KB单位，通用性最好）
+        try {
+          dfOutput = execSync(`df -k "${uploadDir}"`, { 
+            encoding: 'utf8',
+            shell: '/bin/sh',
+            timeout: 5000
+          }).toString();
+          useBytesUnit = false;
+        } catch (dfkError) {
+          // 最后尝试不带参数的 df（某些老旧系统）
+          dfOutput = execSync(`df "${uploadDir}"`, { 
+            encoding: 'utf8',
+            shell: '/bin/sh',
+            timeout: 5000
+          }).toString();
+          useBytesUnit = false;
+        }
+      }
+      
+      // 解析 df 输出
+      const lines = dfOutput.trim().split('\n');
+      
+      if (lines.length >= 2) {
+        // df 输出格式（可能会换行）：
+        // Filesystem     1K-blocks    Used Available Use% Mounted on
+        // /dev/sda1       10485760 5242880   5242880  50% /
+        
+        // 处理可能的换行情况
+        let dataLine = lines[1].trim();
+        
+        // 如果第二行是以 /dev/ 开头但没有数字，说明数据在第三行
+        if (lines.length >= 3 && dataLine.match(/^\/\w+/) && !dataLine.match(/\d/)) {
+          dataLine = lines[2].trim();
+        }
+        
+        // 分割数据（使用正则处理多个空格）
+        const parts = dataLine.split(/\s+/);
+        
+        // 识别数据位置（有些系统 Filesystem 列可能很长）
+        let sizeIndex = -1;
+        for (let i = 0; i < parts.length; i++) {
+          // 找到第一个纯数字列
+          if (parts[i].match(/^\d+$/)) {
+            sizeIndex = i;
+            break;
+          }
+        }
+        
+        if (sizeIndex >= 0 && parts.length >= sizeIndex + 3) {
+          const totalBlocks = parseInt(parts[sizeIndex]) || 0;
+          const usedBlocks = parseInt(parts[sizeIndex + 1]) || 0;
+          const availBlocks = parseInt(parts[sizeIndex + 2]) || 0;
+          
+          if (useBytesUnit) {
+            // -B1 参数，直接是字节
+            diskSpace.total = totalBlocks;
+            diskSpace.used = usedBlocks;
+            diskSpace.free = availBlocks;
+          } else {
+            // -k 或默认参数，是 1K blocks，需要转换为字节
+            diskSpace.total = totalBlocks * 1024;
+            diskSpace.used = usedBlocks * 1024;
+            diskSpace.free = availBlocks * 1024;
+          }
+          
+          console.log(`[磁盘空间] 总容量: ${(diskSpace.total / 1024 / 1024 / 1024).toFixed(2)} GB, ` +
+                      `已用: ${(diskSpace.used / 1024 / 1024 / 1024).toFixed(2)} GB, ` +
+                      `可用: ${(diskSpace.free / 1024 / 1024 / 1024).toFixed(2)} GB`);
+        }
+      }
+      
+    } catch (error) {
+      console.error('获取磁盘空间失败:', error.message);
+      console.error('请确保系统支持 df 命令（Linux标准工具）');
+      // 失败时使用默认值
+      diskSpace = { total: 0, free: 0, used: 0 };
+    }
+    
+    // 获取文件列表
+    const files = [];
+    let totalSize = 0;
+    
+    // 确保上传目录存在
+    if (!fs.existsSync(uploadDir)) {
+      fs.mkdirSync(uploadDir, { recursive: true });
+    }
+    
+    // 加载当前配置
+    const currentConfig = adminMiddleware.loadConfig();
+    const retentionHours = currentConfig.storageConfig.fileRetentionHours || 24;
+    const deleteOnDownload = currentConfig.storageConfig.deleteOnDownload || false;
+    
+    // 遍历存储的会话信息
+    for (const [pickupCode, fileInfo] of storedFileSessions.entries()) {
+      const filePath = path.join(uploadDir, fileInfo.filename);
+      
+      try {
+        // 检查文件是否真实存在
+        if (fs.existsSync(filePath)) {
+          const stats = fs.statSync(filePath);
+          
+          // 使用文件信息中的上传时间，如果没有则使用文件的修改时间
+          const uploadTime = fileInfo.uploadTime || stats.mtimeMs;
+          
+          // 计算删除时间和剩余时间
+          let deleteTime = null;
+          let remainingMs = null;
+          
+          if (deleteOnDownload) {
+            // 下载后删除模式
+            deleteTime = null;
+            remainingMs = null;
+          } else {
+            // 定时删除模式
+            deleteTime = uploadTime + (retentionHours * 60 * 60 * 1000);
+            remainingMs = Math.max(0, deleteTime - Date.now());
+          }
+          
+          // 获取实际文件大小（以防万一与记录不符）
+          const actualSize = stats.size;
+          const recordedSize = fileInfo.size || actualSize;
+          
+          files.push({
+            pickupCode: pickupCode,
+            originalName: fileInfo.originalName || fileInfo.filename,
+            filename: fileInfo.filename,
+            size: actualSize, // 使用实际大小
+            uploadTime: uploadTime,
+            deleteTime: deleteTime,
+            remainingMs: remainingMs,
+            deleteMode: deleteOnDownload ? 'download' : 'timer',
+            downloaded: fileInfo.downloaded || false,
+            retentionHours: retentionHours
+          });
+          
+          totalSize += actualSize;
+        } else {
+          // 文件不存在但会话记录存在，清理无效记录
+          console.warn(`[文件管理] 文件不存在，清理会话记录: ${pickupCode} - ${fileInfo.filename}`);
+          storedFileSessions.delete(pickupCode);
+        }
+      } catch (error) {
+        console.error(`[文件管理] 处理文件失败: ${pickupCode}`, error.message);
+      }
+    }
+    
+    // 按上传时间降序排序（最新的在前）
+    files.sort((a, b) => b.uploadTime - a.uploadTime);
+    
+    console.log(`[文件管理] 当前文件数: ${files.length}, 总大小: ${(totalSize / 1024 / 1024).toFixed(2)} MB`);
+    
+    res.json({
+      success: true,
+      diskSpace: diskSpace,
+      files: files,
+      totalSize: totalSize,
+      fileCount: files.length,
+      uploadDir: uploadDir
+    });
+    
+  } catch (error) {
+    console.error('获取文件列表失败:', error);
+    res.status(500).json({ 
+      success: false, 
+      message: '获取文件列表失败: ' + error.message 
+    });
+  }
+});
+
+// 删除指定文件
+app.delete('/api/admin/files/:pickupCode', adminMiddleware.requireAdmin, (req, res) => {
+  const pickupCode = req.params.pickupCode;
+  
+  try {
+    deleteStoredFile(pickupCode);
+    res.json({ 
+      success: true, 
+      message: '文件已删除' 
+    });
+  } catch (error) {
+    console.error('删除文件失败:', error);
+    res.status(500).json({ 
+      success: false, 
+      message: '删除文件失败: ' + error.message 
+    });
+  }
+});
+
+// 删除所有文件（包括孤立文件和损坏文件）
+app.delete('/api/admin/files/all', adminMiddleware.requireAdmin, (req, res) => {
+  try {
+    let deletedCount = 0;
+    let freedSpace = 0;
+    let failedCount = 0;
+    
+    // 读取 files 目录下的所有文件
+    if (fs.existsSync(uploadDir)) {
+      const allFiles = fs.readdirSync(uploadDir);
+      
+      console.log(`[管理员] 开始清理，共发现 ${allFiles.length} 个文件`);
+      
+      for (const filename of allFiles) {
+        const filePath = path.join(uploadDir, filename);
+        
+        try {
+          // 检查是否为文件（排除目录）
+          const stats = fs.statSync(filePath);
+          if (stats.isFile()) {
+            const fileSize = stats.size;
+            
+            // 尝试删除文件（包括损坏的文件）
+            fs.unlinkSync(filePath);
+            
+            freedSpace += fileSize;
+            deletedCount++;
+            
+            console.log(`[管理员] ✅ 删除文件: ${filename} (${(fileSize / 1024 / 1024).toFixed(2)} MB)`);
+          } else if (stats.isDirectory()) {
+            console.log(`[管理员] ⏭️  跳过目录: ${filename}`);
+          }
+        } catch (error) {
+          // 即使文件损坏或无法读取，也尝试强制删除
+          try {
+            fs.unlinkSync(filePath);
+            deletedCount++;
+            console.log(`[管理员] ✅ 强制删除损坏文件: ${filename}`);
+          } catch (forceError) {
+            failedCount++;
+            console.error(`[管理员] ❌ 无法删除文件: ${filename}`, forceError.message);
+          }
+        }
+      }
+      
+      // 清空所有会话记录
+      storedFileSessions.clear();
+      
+      console.log(`[管理员] 删除完成 - 成功: ${deletedCount}, 失败: ${failedCount}, 释放空间: ${(freedSpace / 1024 / 1024).toFixed(2)} MB`);
+      
+      res.json({ 
+        success: true, 
+        message: failedCount > 0 ? `删除完成，${failedCount} 个文件删除失败` : '所有文件已删除',
+        deletedCount: deletedCount,
+        failedCount: failedCount,
+        freedSpace: freedSpace
+      });
+    } else {
+      console.log('[管理员] 上传目录不存在');
+      res.json({ 
+        success: true, 
+        message: '上传目录不存在或为空',
+        deletedCount: 0,
+        freedSpace: 0
+      });
+    }
+  } catch (error) {
+    console.error('[管理员] 删除所有文件失败:', error);
+    res.status(500).json({ 
+      success: false, 
+      message: '删除失败: ' + error.message 
+    });
+  }
+});
+
+// 更新管理员配置
+app.put('/api/admin/config', adminMiddleware.requireAdmin, (req, res) => {
+  const { features } = req.body;
+  
+  if (!features) {
+    return res.status(400).json({ success: false, message: '缺少配置数据' });
+  }
+  
+  if (adminMiddleware.updateFeatureConfig(features)) {
+    res.json({ success: true, message: '配置已更新' });
+  } else {
+    res.status(500).json({ success: false, message: '配置更新失败' });
+  }
+});
+
+// 修改管理员密码
+app.post('/api/admin/change-password', adminMiddleware.requireAdmin, (req, res) => {
+  const { currentPassword, newPassword } = req.body;
+  
+  if (!currentPassword || !newPassword) {
+    return res.status(400).json({ success: false, message: '请填写所有字段' });
+  }
+  
+  if (!adminMiddleware.verifyAdminPassword(currentPassword)) {
+    return res.status(401).json({ success: false, message: '当前密码错误' });
+  }
+  
+  if (newPassword.length < 6) {
+    return res.status(400).json({ success: false, message: '新密码长度至少6位' });
+  }
+  
+  const config = adminMiddleware.loadConfig();
+  config.adminPassword = newPassword;
+  
+  if (adminMiddleware.saveConfig(config)) {
+    res.json({ success: true, message: '密码修改成功' });
+  } else {
+    res.status(500).json({ success: false, message: '密码修改失败' });
+  }
+});
+
+// 获取功能配置（公开接口）
+app.get('/api/features', (req, res) => {
+  const features = adminMiddleware.getFeatureConfig();
+  const config = adminMiddleware.loadConfig();
+  res.json({ 
+    success: true, 
+    features,
+    storageConfig: config ? config.storageConfig : null
+  });
+});
+
 // 主页面路由
 app.get('/', (req, res) => {
   res.sendFile(path.join(__dirname, 'public', 'index.html'));
 });
+
+// ========== 文件存储模式 API ==========
+
+// 文件上传接口（服务器存储模式）
+app.post('/api/upload-file', upload.single('file'), (req, res) => {
+  const config = adminMiddleware.getFeatureConfig();
+  
+  if (!config || !config.serverStorage) {
+    // 如果功能未启用但文件已上传，删除该文件
+    if (req.file) {
+      fs.unlink(req.file.path, (err) => {
+        if (err) console.error('[上传] 删除未授权上传文件失败:', err);
+      });
+    }
+    return res.status(403).json({ 
+      success: false, 
+      message: '服务器存储模式未启用' 
+    });
+  }
+  
+  if (!req.file) {
+    return res.status(400).json({ success: false, message: '未选择文件' });
+  }
+  
+  const pickupCode = generatePickupCode();
+  const fileInfo = {
+    pickupCode: pickupCode,
+    filename: req.file.filename,
+    originalName: req.file.originalname,
+    size: req.file.size,
+    mimetype: req.file.mimetype,
+    uploadTime: Date.now(),
+    downloaded: false
+  };
+  
+  storedFileSessions.set(pickupCode, fileInfo);
+  
+  // 获取当前配置
+  const currentConfig = adminMiddleware.loadConfig();
+  const retentionHours = currentConfig.storageConfig.fileRetentionHours || 24;
+  const deleteOnDownload = currentConfig.storageConfig.deleteOnDownload || false;
+  
+  // 设置文件过期清理（如果不是下载后删除模式）
+  if (!deleteOnDownload) {
+    setTimeout(() => {
+      deleteStoredFile(pickupCode);
+    }, retentionHours * 60 * 60 * 1000);
+  }
+  
+  console.log(`[服务器存储] 文件已上传: ${pickupCode} - ${req.file.originalname} (保留${deleteOnDownload ? '下载后删除' : retentionHours + '小时'})`);
+  
+  res.json({
+    success: true,
+    pickupCode: pickupCode,
+    retentionHours: deleteOnDownload ? '下载后删除' : retentionHours,
+    deleteOnDownload: deleteOnDownload,
+    fileInfo: {
+      name: req.file.originalname,
+      size: req.file.size,
+      type: req.file.mimetype
+    }
+  });
+});
+
+// 获取存储文件信息
+app.get('/api/stored-file/:code', (req, res) => {
+  const pickupCode = req.params.code;
+  const fileInfo = storedFileSessions.get(pickupCode);
+  
+  if (!fileInfo) {
+    return res.status(404).json({ 
+      success: false, 
+      message: '取件码无效或文件已过期' 
+    });
+  }
+  
+  res.json({
+    success: true,
+    fileInfo: {
+      name: fileInfo.originalName,
+      size: fileInfo.size,
+      type: fileInfo.mimetype
+    }
+  });
+});
+
+// 下载存储文件
+app.get('/api/download-stored/:code', (req, res) => {
+  const pickupCode = req.params.code;
+  const fileInfo = storedFileSessions.get(pickupCode);
+  
+  if (!fileInfo) {
+    return res.status(404).send('取件码无效或文件已过期');
+  }
+  
+  const config = adminMiddleware.loadConfig();
+  const filePath = path.join(config.storageConfig.uploadDir, fileInfo.filename);
+  
+  if (!fs.existsSync(filePath)) {
+    storedFileSessions.delete(pickupCode);
+    return res.status(404).send('文件不存在');
+  }
+  
+  // 设置下载头
+  const fileName = encodeURIComponent(fileInfo.originalName);
+  res.setHeader('Content-Disposition', `attachment; filename="${fileName}"; filename*=UTF-8''${fileName}`);
+  res.setHeader('Content-Type', fileInfo.mimetype || 'application/octet-stream');
+  res.setHeader('Content-Length', fileInfo.size);
+  res.setHeader('Cache-Control', 'no-cache'); // 禁用缓存
+  res.setHeader('X-Content-Type-Options', 'nosniff'); // 安全头
+  res.setHeader('Accept-Ranges', 'bytes'); // 支持断点续传
+  
+  // 流式发送文件（优化缓冲区大小）
+  const fileStream = fs.createReadStream(filePath, {
+    highWaterMark: 512 * 1024 // 512KB缓冲区，提升读取速度
+  });
+  
+  fileStream.on('end', () => {
+    console.log(`[服务器存储] 文件已下载: ${pickupCode}`);
+    fileInfo.downloaded = true;
+    
+    // 检查是否设置为下载后删除
+    const currentConfig = adminMiddleware.loadConfig();
+    const deleteOnDownload = currentConfig.storageConfig.deleteOnDownload || false;
+    
+    if (deleteOnDownload) {
+      // 立即删除文件
+      console.log(`[服务器存储] 配置为下载后删除，立即清理文件: ${pickupCode}`);
+      setTimeout(() => {
+        deleteStoredFile(pickupCode);
+      }, 2000);
+    } else {
+      // 5秒后删除（保持原有逻辑）
+      setTimeout(() => {
+        deleteStoredFile(pickupCode);
+      }, 5000);
+    }
+  });
+  
+  fileStream.on('error', (error) => {
+    console.error(`[服务器存储] 文件读取错误:`, error);
+    res.status(500).send('文件读取失败');
+  });
+  
+  fileStream.pipe(res);
+});
+
+// 删除存储文件
+function deleteStoredFile(pickupCode) {
+  const fileInfo = storedFileSessions.get(pickupCode);
+  
+  if (!fileInfo) return;
+  
+  const config = adminMiddleware.loadConfig();
+  const filePath = path.join(config.storageConfig.uploadDir, fileInfo.filename);
+  
+  try {
+    if (fs.existsSync(filePath)) {
+      fs.unlinkSync(filePath);
+      console.log(`[服务器存储] 文件已删除: ${pickupCode} - ${fileInfo.originalName}`);
+    }
+  } catch (error) {
+    console.error(`[服务器存储] 删除文件失败:`, error);
+  }
+  
+  storedFileSessions.delete(pickupCode);
+}
 
 // 新增：HTTP流式下载接口
 app.get('/api/download/:code', (req, res) => {
@@ -334,15 +1099,100 @@ setInterval(() => {
   const now = Date.now();
   const expiredTime = 30 * 60 * 1000; // 30分钟过期
   
+  // 清理过期的活跃会话
   for (const [pickupCode, session] of activeSessions.entries()) {
     if (now - session.createdAt > expiredTime) {
-      console.log(`清理过期会话: ${pickupCode}`);
+      console.log(`[会话清理] 清理过期会话: ${pickupCode}`);
       activeSessions.delete(pickupCode);
     }
   }
-}, 5 * 60 * 1000);
+  
+  // 清理过期的存储文件
+  const config = adminMiddleware.loadConfig();
+  if (config && config.features.serverStorage) {
+    const retentionHours = config.storageConfig.fileRetentionHours || 24;
+    const deleteOnDownload = config.storageConfig.deleteOnDownload || false;
+    
+    // 如果不是"下载后删除"模式，才进行定时清理
+    if (!deleteOnDownload) {
+      for (const [pickupCode, fileInfo] of storedFileSessions.entries()) {
+        const uploadTime = fileInfo.uploadTime || Date.now();
+        const fileAge = now - uploadTime;
+        const maxAge = retentionHours * 60 * 60 * 1000;
+        
+        if (fileAge > maxAge) {
+          console.log(`[文件清理] 清理过期文件: ${pickupCode} - ${fileInfo.originalName} (已存储 ${(fileAge / 3600000).toFixed(1)} 小时)`);
+          deleteStoredFile(pickupCode);
+        }
+      }
+    }
+  }
+  
+  // 清理孤儿文件（磁盘上存在但没有会话记录的文件）
+  cleanOrphanFiles();
+}, 5 * 60 * 1000); // 每5分钟执行一次
+
+// 清理孤儿文件（上传中断或异常留下的文件）
+function cleanOrphanFiles() {
+  const config = adminMiddleware.loadConfig();
+  if (!config || !config.features.serverStorage) return;
+  
+  const uploadDir = path.resolve(config.storageConfig.uploadDir);
+  if (!fs.existsSync(uploadDir)) return;
+  
+  try {
+    const files = fs.readdirSync(uploadDir);
+    const now = Date.now();
+    const orphanAgeThreshold = 10 * 60 * 1000; // 10分钟，给上传足够的时间
+    
+    // 获取所有有效文件名
+    const validFilenames = new Set();
+    for (const [, fileInfo] of storedFileSessions.entries()) {
+      validFilenames.add(fileInfo.filename);
+    }
+    
+    // 检查每个文件
+    for (const filename of files) {
+      if (!validFilenames.has(filename)) {
+        const filePath = path.join(uploadDir, filename);
+        const stats = fs.statSync(filePath);
+        const fileAge = now - stats.mtimeMs;
+        
+        // 如果文件超过10分钟且没有会话记录，视为孤儿文件
+        if (fileAge > orphanAgeThreshold) {
+          fs.unlink(filePath, (err) => {
+            if (err) {
+              console.error(`[孤儿文件清理] 删除失败: ${filename}`, err);
+            } else {
+              console.log(`[孤儿文件清理] 已删除孤儿文件: ${filename} (年龄: ${(fileAge / 60000).toFixed(1)} 分钟)`);
+            }
+          });
+        }
+      }
+    }
+  } catch (error) {
+    console.error('[孤儿文件清理] 清理过程出错:', error);
+  }
+}
+
+// 启动前检查
+require('./startup-check');
 
 server.listen(PORT, () => {
-  console.log(`File-Rocket 服务器运行在端口 ${PORT}`);
-  console.log(`访问地址: http://localhost:${PORT}`);
+  console.log('='.repeat(50));
+  console.log(`🚀 File-Rocket 4.0 服务器启动成功!`);
+  console.log(`📍 访问地址: http://localhost:${PORT}`);
+  console.log(`🔐 管理后台: 点击首页版权文字 4 次`);
+  console.log('='.repeat(50));
+  console.log(`\n当前配置:`);
+  
+  const config = adminMiddleware.loadConfig();
+  if (config) {
+    console.log(`  - 内存流式传输: ${config.features.memoryStreaming ? '✅' : '❌'}`);
+    console.log(`  - 服务器存储: ${config.features.serverStorage ? '✅' : '❌'}`);
+    console.log(`  - P2P 直连: ${config.features.p2pDirect ? '✅' : '❌'}`);
+  }
+  
+  console.log(`\n活跃会话: ${activeSessions.size}`);
+  console.log(`存储文件: ${storedFileSessions.size}\n`);
 });

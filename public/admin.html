@@ -1,0 +1,1006 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>管理员控制台 - File-Rocket</title>
+    <link rel="stylesheet" href="style.css">
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&display=swap" rel="stylesheet">
+    <style>
+        body {
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            min-height: 100vh;
+        }
+        
+        .container {
+            width: 100%;
+            max-width: 800px;
+        }
+        
+        .admin-container {
+            max-width: 800px;
+            margin: 0 auto;
+            padding: 40px 20px;
+            width: 100%;
+        }
+        
+        .admin-card {
+            background: var(--glass-bg);
+            backdrop-filter: blur(20px);
+            -webkit-backdrop-filter: blur(20px);
+            border: 1px solid rgba(255, 255, 255, 0.6);
+            border-radius: var(--radius-lg);
+            padding: 40px;
+            box-shadow: var(--glass-shadow);
+            margin-bottom: 30px;
+        }
+        
+        .admin-header {
+            text-align: center;
+            margin-bottom: 40px;
+        }
+        
+        .admin-header h1 {
+            color: white !important;
+            font-size: 2rem;
+            font-weight: 800;
+            letter-spacing: -0.5px;
+            text-shadow: 0 2px 10px rgba(0,0,0,0.2);
+            margin-bottom: 10px;
+        }
+        
+        .feature-toggle {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            padding: 20px;
+            background: rgba(255, 255, 255, 0.5);
+            border-radius: var(--radius-md);
+            margin-bottom: 15px;
+            transition: var(--transition);
+        }
+        
+        .feature-toggle:hover {
+            background: rgba(255, 255, 255, 0.7);
+        }
+        
+        .feature-info h3 {
+            margin-bottom: 5px;
+            color: var(--text-main);
+        }
+        
+        .feature-info p {
+            color: var(--text-sub);
+            font-size: 0.9rem;
+        }
+        
+        .toggle-switch {
+            position: relative;
+            width: 60px;
+            height: 30px;
+        }
+        
+        .toggle-switch input {
+            opacity: 0;
+            width: 0;
+            height: 0;
+        }
+        
+        .slider {
+            position: absolute;
+            cursor: pointer;
+            top: 0;
+            left: 0;
+            right: 0;
+            bottom: 0;
+            background-color: #ccc;
+            transition: 0.4s;
+            border-radius: 30px;
+        }
+        
+        .slider:before {
+            position: absolute;
+            content: "";
+            height: 22px;
+            width: 22px;
+            left: 4px;
+            bottom: 4px;
+            background-color: white;
+            transition: 0.4s;
+            border-radius: 50%;
+        }
+        
+        input:checked + .slider {
+            background: var(--primary-gradient);
+        }
+        
+        input:checked + .slider:before {
+            transform: translateX(30px);
+        }
+        
+        .stats-grid {
+            display: grid;
+            grid-template-columns: repeat(auto-fit, minmax(200px, 1fr));
+            gap: 20px;
+            margin-top: 30px;
+        }
+        
+        .stat-box {
+            background: rgba(255, 255, 255, 0.5);
+            padding: 20px;
+            border-radius: var(--radius-md);
+            text-align: center;
+        }
+        
+        .stat-box h4 {
+            color: var(--text-sub);
+            font-size: 0.9rem;
+            margin-bottom: 10px;
+        }
+        
+        .stat-box .value {
+            font-size: 2rem;
+            font-weight: 700;
+            background: var(--primary-gradient);
+            -webkit-background-clip: text;
+            background-clip: text;
+            -webkit-text-fill-color: transparent;
+        }
+        
+        .logout-btn {
+            background: #dc3545;
+            color: white;
+            border: none;
+            border-radius: 50px;
+            padding: 12px 30px;
+            font-weight: 600;
+            cursor: pointer;
+            transition: var(--transition);
+            display: block;
+            margin: 30px auto 0;
+        }
+        
+        .logout-btn:hover {
+            background: #c82333;
+            transform: translateY(-2px);
+        }
+        
+        .password-section {
+            background: rgba(255, 255, 255, 0.5);
+            padding: 20px;
+            border-radius: var(--radius-md);
+            margin-top: 20px;
+        }
+        
+        .password-section input {
+            width: 100%;
+            padding: 12px;
+            border: 2px solid #e5e7eb;
+            border-radius: 10px;
+            font-size: 1rem;
+            margin-bottom: 10px;
+        }
+        
+        .password-section button {
+            width: 100%;
+            background: var(--primary-gradient);
+            color: white;
+            border: none;
+            border-radius: 10px;
+            padding: 12px;
+            font-weight: 600;
+            cursor: pointer;
+        }
+        
+        /* 文件管理样式 */
+        .storage-info {
+            display: grid;
+            grid-template-columns: repeat(auto-fit, minmax(200px, 1fr));
+            gap: 15px;
+            margin-bottom: 20px;
+        }
+        
+        .info-box {
+            background: rgba(255, 255, 255, 0.5);
+            padding: 15px;
+            border-radius: var(--radius-md);
+            text-align: center;
+        }
+        
+        .info-box h4 {
+            font-size: 0.9rem;
+            color: var(--text-sub);
+            margin-bottom: 8px;
+        }
+        
+        .info-box .value {
+            font-size: 1.5rem;
+            font-weight: 700;
+            color: var(--primary);
+        }
+        
+        .progress-bar {
+            height: 8px;
+            background: rgba(255, 255, 255, 0.5);
+            border-radius: 4px;
+            overflow: hidden;
+            margin-top: 10px;
+        }
+        
+        .progress-fill {
+            height: 100%;
+            background: var(--primary-gradient);
+            transition: width 0.3s ease;
+        }
+        
+        .file-table {
+            width: 100%;
+            background: rgba(255, 255, 255, 0.5);
+            border-radius: var(--radius-md);
+            overflow: hidden;
+            margin-top: 20px;
+        }
+        
+        .file-table table {
+            width: 100%;
+            border-collapse: collapse;
+        }
+        
+        .file-table th {
+            background: rgba(99, 102, 241, 0.1);
+            padding: 12px;
+            text-align: left;
+            font-weight: 600;
+            color: var(--text-main);
+            border-bottom: 2px solid rgba(99, 102, 241, 0.2);
+        }
+        
+        .file-table td {
+            padding: 12px;
+            border-bottom: 1px solid rgba(0, 0, 0, 0.05);
+            color: var(--text-main);
+        }
+        
+        .file-table tr:hover {
+            background: rgba(99, 102, 241, 0.05);
+        }
+        
+        .delete-btn {
+            background: #dc3545;
+            color: white;
+            border: none;
+            border-radius: 6px;
+            padding: 6px 12px;
+            font-size: 0.85rem;
+            cursor: pointer;
+            transition: var(--transition);
+        }
+        
+        .delete-btn:hover {
+            background: #c82333;
+            transform: scale(1.05);
+        }
+        
+        .remaining-time {
+            color: #f59e0b;
+            font-weight: 600;
+        }
+        
+        .remaining-time.urgent {
+            color: #dc3545;
+        }
+        
+        .download-mode {
+            color: #10b981;
+            font-weight: 600;
+        }
+        
+        .file-action-btn {
+            display: inline-flex;
+            align-items: center;
+            justify-content: center;
+            border: none;
+            border-radius: 8px;
+            padding: 10px 20px;
+            font-size: 1rem;
+            font-weight: 600;
+            cursor: pointer;
+            transition: var(--transition);
+            line-height: 1.5;
+            height: 42px;
+            box-sizing: border-box;
+            white-space: nowrap;
+        }
+        
+        .refresh-btn {
+            background: var(--primary-gradient);
+            color: white;
+        }
+        
+        .refresh-btn:hover {
+            transform: translateY(-2px);
+            box-shadow: 0 4px 12px rgba(99, 102, 241, 0.3);
+        }
+        
+        .delete-all-btn {
+            background: linear-gradient(135deg, #ef4444, #dc2626);
+            color: white;
+        }
+        
+        .delete-all-btn:hover {
+            background: linear-gradient(135deg, #dc2626, #b91c1c);
+            transform: translateY(-2px);
+            box-shadow: 0 4px 12px rgba(239, 68, 68, 0.4);
+        }
+        
+        /* 移动端适配 */
+        @media (max-width: 768px) {
+            .admin-container {
+                padding: 20px 15px;
+            }
+            
+            .admin-card {
+                padding: 25px 20px;
+                margin-bottom: 20px;
+            }
+            
+            .admin-header h1 {
+                font-size: 1.6rem !important;
+            }
+            
+            .admin-header p {
+                font-size: 0.9rem !important;
+            }
+            
+            .feature-toggle {
+                flex-direction: column;
+                align-items: flex-start;
+                padding: 15px;
+            }
+            
+            .feature-info {
+                margin-bottom: 15px;
+            }
+            
+            .feature-info h3 {
+                font-size: 1rem;
+            }
+            
+            .feature-info p {
+                font-size: 0.85rem;
+            }
+            
+            .stats-grid {
+                grid-template-columns: 1fr !important;
+                gap: 12px;
+            }
+            
+            .storage-info {
+                grid-template-columns: 1fr 1fr !important;
+                gap: 10px;
+            }
+            
+            .info-box h4 {
+                font-size: 0.8rem;
+            }
+            
+            .info-box .value {
+                font-size: 1.2rem;
+            }
+            
+            .file-table {
+                overflow-x: auto;
+                -webkit-overflow-scrolling: touch;
+            }
+            
+            .file-table table {
+                min-width: 600px;
+                font-size: 0.85rem;
+            }
+            
+            .file-table th,
+            .file-table td {
+                padding: 8px 6px;
+            }
+            
+            .password-section input {
+                font-size: 0.9rem;
+                padding: 10px;
+            }
+            
+            .logout-btn {
+                width: 100%;
+                padding: 15px;
+                margin-top: 20px;
+            }
+            
+            .setting-item {
+                flex-direction: column;
+                align-items: flex-start !important;
+            }
+            
+            .setting-item label {
+                margin-bottom: 8px;
+            }
+            
+            .setting-input {
+                width: 100% !important;
+            }
+        }
+        
+        @media (max-width: 480px) {
+            .admin-header h1 {
+                font-size: 1.4rem !important;
+            }
+            
+            .admin-header h1 span {
+                font-size: 1.6rem !important;
+            }
+            
+            .storage-info {
+                grid-template-columns: 1fr !important;
+            }
+            
+            .file-table table {
+                font-size: 0.75rem;
+            }
+            
+            .delete-btn {
+                padding: 4px 8px;
+                font-size: 0.75rem;
+            }
+        }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <div class="admin-container">
+            <div class="admin-header">
+                <h1 style="display: flex; align-items: center; justify-content: center; gap: 10px;">
+                    <span style="font-size: 2.2rem;">🚀</span>
+                    <span>File-Rocket 控制中心</span>
+                </h1>
+                <p style="color: rgba(255, 255, 255, 0.9); font-size: 1rem; margin-top: 8px; text-shadow: 0 1px 3px rgba(0,0,0,0.1);">系统管理与监控面板</p>
+            </div>
+            
+            <div class="admin-card">
+                <h2 style="margin-bottom: 20px;">传输模式配置</h2>
+                
+                <div class="feature-toggle">
+                    <div class="feature-info">
+                        <h3>内存流式传输</h3>
+                        <p>服务器实时中继，不保存文件（推荐）</p>
+                    </div>
+                    <label class="toggle-switch">
+                        <input type="checkbox" id="memoryStreaming" checked>
+                        <span class="slider"></span>
+                    </label>
+                </div>
+                
+                <div class="feature-toggle">
+                    <div class="feature-info">
+                        <h3>服务器存储中转</h3>
+                        <p>文件暂存服务器，支持异步下载</p>
+                    </div>
+                    <label class="toggle-switch">
+                        <input type="checkbox" id="serverStorage">
+                        <span class="slider"></span>
+                    </label>
+                </div>
+                
+                <!-- 文件保留时间设置 -->
+                <div id="storageSettings" style="margin-top: 15px; margin-bottom: 15px; padding: 15px; background: rgba(255,255,255,0.3); border-radius: 12px; display: none;">
+                    <h4 style="margin-bottom: 10px; color: var(--text-main);">文件保留设置</h4>
+                    <div style="display: flex; flex-direction: column; gap: 10px;">
+                        <label style="display: flex; align-items: center; cursor: pointer;">
+                            <input type="radio" name="retentionMode" value="1" style="margin-right: 10px;">
+                            <span>1小时后自动删除</span>
+                        </label>
+                        <label style="display: flex; align-items: center; cursor: pointer;">
+                            <input type="radio" name="retentionMode" value="24" checked style="margin-right: 10px;">
+                            <span>24小时后自动删除</span>
+                        </label>
+                        <label style="display: flex; align-items: center; cursor: pointer;">
+                            <input type="radio" name="retentionMode" value="download" style="margin-right: 10px;">
+                            <span>接收端下载完成就删除</span>
+                        </label>
+                    </div>
+                </div>
+                
+                <div class="feature-toggle">
+                    <div class="feature-info">
+                        <h3>P2P 直连传输</h3>
+                        <p>点对点连接，无需服务器中转</p>
+                    </div>
+                    <label class="toggle-switch">
+                        <input type="checkbox" id="p2pDirect">
+                        <span class="slider"></span>
+                    </label>
+                </div>
+            </div>
+            
+            <div class="admin-card">
+                <h2 style="margin-bottom: 20px;">系统统计</h2>
+                <div class="stats-grid">
+                    <div class="stat-box">
+                        <h4>活跃会话</h4>
+                        <div class="value" id="activeSessions">0</div>
+                    </div>
+                    <div class="stat-box">
+                        <h4>今日传输</h4>
+                        <div class="value" id="todayTransfers">0</div>
+                    </div>
+                    <div class="stat-box">
+                        <h4>存储文件</h4>
+                        <div class="value" id="storedFiles">0</div>
+                    </div>
+                </div>
+            </div>
+            
+            <div class="admin-card">
+                <h2 style="margin-bottom: 20px;">
+                    文件管理
+                    <span id="uploadDirPath" style="font-size: 0.8rem; color: var(--text-sub); font-weight: normal; margin-left: 10px;">
+                        (加载中...)
+                    </span>
+                </h2>
+                
+                <div style="display: flex; gap: 10px; margin-bottom: 15px; flex-wrap: wrap;">
+                    <button class="file-action-btn refresh-btn" onclick="refreshFileList()">🔄 刷新列表</button>
+                    <button class="file-action-btn delete-all-btn" onclick="deleteAllFiles()">🗑️ 删除所有文件</button>
+                </div>
+                
+                <div class="storage-info">
+                    <div class="info-box">
+                        <h4>磁盘总容量</h4>
+                        <div class="value" id="totalSpace">--</div>
+                    </div>
+                    <div class="info-box">
+                        <h4>可用空间</h4>
+                        <div class="value" id="freeSpace">--</div>
+                    </div>
+                    <div class="info-box">
+                        <h4>已用空间</h4>
+                        <div class="value" id="usedSpace">--</div>
+                    </div>
+                    <div class="info-box">
+                        <h4>文件占用</h4>
+                        <div class="value" id="filesSize">--</div>
+                    </div>
+                </div>
+                
+                <div class="progress-bar">
+                    <div class="progress-fill" id="diskProgress" style="width: 0%"></div>
+                </div>
+                
+                <div class="file-table">
+                    <table>
+                        <thead>
+                            <tr>
+                                <th>取件码</th>
+                                <th>文件名</th>
+                                <th>大小</th>
+                                <th>上传时间</th>
+                                <th>删除策略</th>
+                                <th>剩余时间</th>
+                                <th>操作</th>
+                            </tr>
+                        </thead>
+                        <tbody id="fileListBody">
+                            <tr>
+                                <td colspan="7" style="text-align: center; color: var(--text-sub);">加载中...</td>
+                            </tr>
+                        </tbody>
+                    </table>
+                </div>
+            </div>
+            
+            <div class="admin-card">
+                <h2 style="margin-bottom: 20px;">安全设置</h2>
+                <div class="password-section">
+                    <h3 style="margin-bottom: 15px;">修改管理员密码</h3>
+                    <input type="password" id="currentPassword" placeholder="当前密码">
+                    <input type="password" id="newPassword" placeholder="新密码">
+                    <input type="password" id="confirmPassword" placeholder="确认新密码">
+                    <button onclick="changePassword()">更新密码</button>
+                </div>
+            </div>
+            
+            <button class="logout-btn" onclick="logout()">退出登录</button>
+        </div>
+    </div>
+    
+    <script>
+        // 检查认证
+        const adminToken = sessionStorage.getItem('adminToken');
+        if (!adminToken) {
+            window.location.href = '/';
+        }
+        
+        // 加载配置
+        async function loadConfig() {
+            try {
+                const controller = new AbortController();
+                const timeoutId = setTimeout(() => controller.abort(), 10000); // 10秒超时
+                
+                const response = await fetch('/api/admin/config', {
+                    headers: {
+                        'X-Admin-Token': adminToken
+                    },
+                    signal: controller.signal
+                });
+                
+                clearTimeout(timeoutId);
+                
+                if (!response.ok) {
+                    throw new Error('未授权');
+                }
+                
+                const data = await response.json();
+                
+                // 更新开关状态
+                document.getElementById('memoryStreaming').checked = data.features.memoryStreaming;
+                document.getElementById('serverStorage').checked = data.features.serverStorage;
+                document.getElementById('p2pDirect').checked = data.features.p2pDirect;
+                
+                // 显示/隐藏文件保留设置
+                const storageSettings = document.getElementById('storageSettings');
+                if (storageSettings) {
+                    storageSettings.style.display = data.features.serverStorage ? 'block' : 'none';
+                }
+                
+                // 设置文件保留模式
+                if (data.storageConfig) {
+                    const deleteOnDownload = data.storageConfig.deleteOnDownload || false;
+                    const hours = data.storageConfig.fileRetentionHours || 24;
+                    
+                    if (deleteOnDownload) {
+                        document.querySelector('input[name="retentionMode"][value="download"]').checked = true;
+                    } else if (hours === 1) {
+                        document.querySelector('input[name="retentionMode"][value="1"]').checked = true;
+                    } else {
+                        document.querySelector('input[name="retentionMode"][value="24"]').checked = true;
+                    }
+                }
+                
+                // 更新统计数据
+                if (data.stats) {
+                    document.getElementById('activeSessions').textContent = data.stats.activeSessions || 0;
+                    document.getElementById('todayTransfers').textContent = data.stats.todayTransfers || 0;
+                    document.getElementById('storedFiles').textContent = data.stats.storedFiles || 0;
+                }
+            } catch (error) {
+                console.error('加载配置失败:', error);
+                let errorMsg = '加载配置失败';
+                if (error.name === 'AbortError') {
+                    errorMsg = '请求超时，请检查网络连接';
+                } else if (error.message === '未授权') {
+                    errorMsg = '登录已过期，请重新登录';
+                    window.location.href = '/';
+                    return;
+                } else {
+                    errorMsg += ': ' + error.message;
+                }
+                alert(errorMsg);
+            }
+        }
+        
+        // 更新功能开关
+        async function updateFeature(feature, enabled) {
+            try {
+                const response = await fetch('/api/admin/config', {
+                    method: 'PUT',
+                    headers: {
+                        'Content-Type': 'application/json',
+                        'X-Admin-Token': adminToken
+                    },
+                    body: JSON.stringify({
+                        features: { [feature]: enabled }
+                    })
+                });
+                
+                if (!response.ok) {
+                    throw new Error('更新失败');
+                }
+                
+                console.log(`${feature} 已${enabled ? '启用' : '禁用'}`);
+            } catch (error) {
+                alert('更新配置失败：' + error.message);
+                loadConfig(); // 重新加载配置
+            }
+        }
+        
+        // 绑定开关事件
+        document.getElementById('memoryStreaming').addEventListener('change', (e) => {
+            updateFeature('memoryStreaming', e.target.checked);
+        });
+        
+        document.getElementById('serverStorage').addEventListener('change', (e) => {
+            const enabled = e.target.checked;
+            updateFeature('serverStorage', enabled);
+            
+            // 显示/隐藏文件保留设置
+            const storageSettings = document.getElementById('storageSettings');
+            if (storageSettings) {
+                storageSettings.style.display = enabled ? 'block' : 'none';
+            }
+        });
+        
+        document.getElementById('p2pDirect').addEventListener('change', (e) => {
+            updateFeature('p2pDirect', e.target.checked);
+        });
+        
+        // 绑定文件保留时间设置
+        document.querySelectorAll('input[name="retentionMode"]').forEach(radio => {
+            radio.addEventListener('change', async (e) => {
+                const value = e.target.value;
+                let hours = 24;
+                let deleteOnDownload = false;
+                
+                if (value === '1') {
+                    hours = 1;
+                } else if (value === 'download') {
+                    hours = 24; // 默认24小时作为备份
+                    deleteOnDownload = true;
+                }
+                
+                try {
+                    const response = await fetch('/api/admin/storage-config', {
+                        method: 'PUT',
+                        headers: {
+                            'Content-Type': 'application/json',
+                            'X-Admin-Token': adminToken
+                        },
+                        body: JSON.stringify({
+                            fileRetentionHours: hours,
+                            deleteOnDownload: deleteOnDownload
+                        })
+                    });
+                    
+                    if (response.ok) {
+                        console.log('文件保留设置已更新');
+                    }
+                } catch (error) {
+                    console.error('更新失败:', error);
+                }
+            });
+        });
+        
+        // 修改密码
+        async function changePassword() {
+            const current = document.getElementById('currentPassword').value;
+            const newPass = document.getElementById('newPassword').value;
+            const confirm = document.getElementById('confirmPassword').value;
+            
+            if (!current || !newPass || !confirm) {
+                alert('请填写所有字段');
+                return;
+            }
+            
+            if (newPass !== confirm) {
+                alert('新密码不一致');
+                return;
+            }
+            
+            if (newPass.length < 6) {
+                alert('密码长度至少6位');
+                return;
+            }
+            
+            try {
+                const response = await fetch('/api/admin/change-password', {
+                    method: 'POST',
+                    headers: {
+                        'Content-Type': 'application/json',
+                        'X-Admin-Token': adminToken
+                    },
+                    body: JSON.stringify({
+                        currentPassword: current,
+                        newPassword: newPass
+                    })
+                });
+                
+                const data = await response.json();
+                
+                if (data.success) {
+                    alert('密码修改成功，请重新登录');
+                    logout();
+                } else {
+                    alert(data.message || '密码修改失败');
+                }
+            } catch (error) {
+                alert('密码修改失败：' + error.message);
+            }
+        }
+        
+        // 退出登录
+        function logout() {
+            sessionStorage.removeItem('adminToken');
+            window.location.href = '/';
+        }
+        
+        // 格式化文件大小
+        function formatSize(bytes) {
+            if (bytes === 0) return '0 B';
+            const k = 1024;
+            const sizes = ['B', 'KB', 'MB', 'GB', 'TB'];
+            const i = Math.floor(Math.log(bytes) / Math.log(k));
+            return (bytes / Math.pow(k, i)).toFixed(2) + ' ' + sizes[i];
+        }
+        
+        // 格式化时间
+        function formatTime(timestamp) {
+            const date = new Date(timestamp);
+            const year = date.getFullYear();
+            const month = String(date.getMonth() + 1).padStart(2, '0');
+            const day = String(date.getDate()).padStart(2, '0');
+            const hour = String(date.getHours()).padStart(2, '0');
+            const minute = String(date.getMinutes()).padStart(2, '0');
+            return `${year}年${month}月${day}日 ${hour}点${minute}分`;
+        }
+        
+        // 格式化剩余时间
+        function formatRemainingTime(ms) {
+            if (!ms || ms <= 0) return '已过期';
+            
+            const hours = Math.floor(ms / (1000 * 60 * 60));
+            const minutes = Math.floor((ms % (1000 * 60 * 60)) / (1000 * 60));
+            
+            let result = '';
+            if (hours > 0) result += `${hours}小时`;
+            if (minutes > 0) result += `${minutes}分钟`;
+            
+            return result || '不足1分钟';
+        }
+        
+        // 刷新文件列表
+        async function refreshFileList() {
+            try {
+                const response = await fetch('/api/admin/files', {
+                    headers: {
+                        'X-Admin-Token': adminToken
+                    }
+                });
+                
+                if (!response.ok) {
+                    throw new Error('获取文件列表失败');
+                }
+                
+                const data = await response.json();
+                
+                if (!data.success) {
+                    throw new Error(data.message || '获取失败');
+                }
+                
+                // 更新磁盘空间信息
+                document.getElementById('totalSpace').textContent = formatSize(data.diskSpace.total);
+                document.getElementById('freeSpace').textContent = formatSize(data.diskSpace.free);
+                document.getElementById('usedSpace').textContent = formatSize(data.diskSpace.used);
+                document.getElementById('filesSize').textContent = formatSize(data.totalSize);
+                
+                // 更新上传目录路径
+                if (data.uploadDir) {
+                    document.getElementById('uploadDirPath').textContent = `(目录: ${data.uploadDir})`;
+                }
+                
+                // 更新磁盘使用进度条
+                const usagePercent = data.diskSpace.total > 0 
+                    ? (data.diskSpace.used / data.diskSpace.total * 100).toFixed(1) 
+                    : 0;
+                document.getElementById('diskProgress').style.width = usagePercent + '%';
+                
+                // 更新文件列表
+                const tbody = document.getElementById('fileListBody');
+                
+                if (data.files.length === 0) {
+                    tbody.innerHTML = '<tr><td colspan="7" style="text-align: center; color: var(--text-sub);">暂无文件</td></tr>';
+                } else {
+                    tbody.innerHTML = data.files.map(file => {
+                        const uploadTime = formatTime(file.uploadTime);
+                        const deleteMode = file.deleteMode === 'download' ? '下载后删除' : `${file.deleteTime ? formatTime(file.deleteTime) : '未知'}`;
+                        const remainingTime = file.deleteMode === 'download' 
+                            ? '<span class="download-mode">等待下载</span>'
+                            : file.remainingMs > 0 
+                                ? `<span class="remaining-time ${file.remainingMs < 3600000 ? 'urgent' : ''}">${formatRemainingTime(file.remainingMs)}</span>`
+                                : '<span class="remaining-time urgent">已过期</span>';
+                        
+                        return `
+                            <tr>
+                                <td><strong>${file.pickupCode}</strong></td>
+                                <td title="${file.originalName}">${file.originalName.length > 30 ? file.originalName.substring(0, 30) + '...' : file.originalName}</td>
+                                <td>${formatSize(file.size)}</td>
+                                <td>${uploadTime}</td>
+                                <td>${deleteMode}</td>
+                                <td>${remainingTime}</td>
+                                <td>
+                                    <button class="delete-btn" onclick="deleteFile('${file.pickupCode}', '${file.originalName}')">删除</button>
+                                </td>
+                            </tr>
+                        `;
+                    }).join('');
+                }
+                
+            } catch (error) {
+                console.error('刷新文件列表失败:', error);
+                alert('刷新失败: ' + error.message);
+            }
+        }
+        
+        // 删除文件
+        async function deleteFile(pickupCode, filename) {
+            if (!confirm(`确定要删除文件 "${filename}" 吗？`)) {
+                return;
+            }
+            
+            try {
+                const response = await fetch(`/api/admin/files/${pickupCode}`, {
+                    method: 'DELETE',
+                    headers: {
+                        'X-Admin-Token': adminToken
+                    }
+                });
+                
+                const data = await response.json();
+                
+                if (data.success) {
+                    alert('文件已删除');
+                    refreshFileList();
+                } else {
+                    alert('删除失败: ' + (data.message || '未知错误'));
+                }
+            } catch (error) {
+                console.error('删除文件失败:', error);
+                alert('删除失败: ' + error.message);
+            }
+        }
+        
+        // 删除所有文件（包括孤立文件）
+        async function deleteAllFiles() {
+            const confirmMsg = '⚠️ 警告：此操作将删除 files 文件夹内的所有文件！\n\n这包括：\n- 正在传输的文件\n- 已上传的文件\n- 孤立的损坏文件\n\n此操作不可撤销，确定要继续吗？';
+            
+            if (!confirm(confirmMsg)) {
+                return;
+            }
+            
+            // 二次确认
+            const doubleConfirm = prompt('请输入 "DELETE ALL" 确认删除所有文件：');
+            if (doubleConfirm !== 'DELETE ALL') {
+                alert('❌ 确认文本不正确，操作已取消');
+                return;
+            }
+            
+            try {
+                const response = await fetch('/api/admin/files/all', {
+                    method: 'DELETE',
+                    headers: {
+                        'X-Admin-Token': adminToken
+                    }
+                });
+                
+                const data = await response.json();
+                
+                if (data.success) {
+                    alert(`✅ 清理完成！\n\n删除文件数：${data.deletedCount}\n清理空间：${formatSize(data.freedSpace)}`);
+                    refreshFileList();
+                } else {
+                    alert('❌ 删除失败: ' + (data.message || '未知错误'));
+                }
+            } catch (error) {
+                console.error('删除所有文件失败:', error);
+                alert('❌ 删除失败，请稍后重试');
+            }
+        }
+        
+        // 页面加载时初始化
+        loadConfig();
+        refreshFileList();
+        
+        // 定期刷新统计数据和文件列表
+        setInterval(loadConfig, 10000);
+        setInterval(refreshFileList, 30000); // 每30秒刷新文件列表
+    </script>
+</body>
+</html>
+
