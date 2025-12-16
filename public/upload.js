@@ -425,43 +425,52 @@ async function createP2PSession() {
             });
             
             // P2P事件处理
-            let p2pLastUpdate = Date.now();
-            let p2pLastTransferred = 0;
-            
             p2p.onChannelOpen = () => {
                 statusText.textContent = 'P2P连接已建立，开始传输...';
                 showStage('transfer-stage');
                 transferStartTime = Date.now();
-                p2pLastUpdate = Date.now();
-                p2pLastTransferred = 0;
             };
             
-            p2p.onProgress = (progress, transferred, total) => {
-                updateProgress(progress);
-                
-                // 计算实时速度（基于最近一段时间的传输量）
-                const now = Date.now();
-                const timeDelta = (now - p2pLastUpdate) / 1000;
-                const bytesDelta = transferred - p2pLastTransferred;
-                
-                if (timeDelta > 0) {
-                    const instantSpeed = bytesDelta / timeDelta;
-                    transferSpeed.textContent = `${formatFileSize(instantSpeed)}/s`;
+            // P2P模式下，发送端不再自己计算进度，而是接收来自接收端的进度
+            // 监听来自接收端的进度更新
+            socket.on('p2p-progress', (data) => {
+                // 严格验证：只接收属于当前房间的进度
+                if (data.pickupCode !== pickupCode) {
+                    console.log(`[房间隔离] 忽略不属于当前房间的P2P进度: ${data.pickupCode} (当前: ${pickupCode})`);
+                    return;
                 }
                 
-                // 更新统计
-                p2pLastUpdate = now;
-                p2pLastTransferred = transferred;
-            };
+                // 更新进度和速度（来自接收端的真实数据）
+                updateProgress(data.progress);
+                transferSpeed.textContent = `${formatFileSize(data.speed)}/s`;
+                
+                console.log(`📊 [P2P同步] 进度: ${data.progress.toFixed(1)}%, 速度: ${formatFileSize(data.speed)}/s, 已接收: ${formatFileSize(data.bytesReceived)}`);
+            });
             
-            p2p.onComplete = () => {
+            // 监听来自接收端的完成通知
+            socket.on('p2p-complete', (data) => {
+                // 严格验证：只接收属于当前房间的完成通知
+                if (data.pickupCode !== pickupCode) {
+                    console.log(`[房间隔离] 忽略不属于当前房间的P2P完成: ${data.pickupCode} (当前: ${pickupCode})`);
+                    return;
+                }
+                
+                console.log(`🎉 [P2P] 接收端确认完成，总大小: ${formatFileSize(data.totalBytes)}`);
+                
+                // 显示完成页面
                 setTimeout(() => {
                     showStage('complete-stage');
                 }, 500);
+            });
+            
+            p2p.onComplete = () => {
+                // 发送完成，等待接收端确认
+                console.log('✅ [P2P] 文件发送完成，等待接收端确认...');
+                statusText.textContent = '文件发送完成，等待接收端保存...';
             };
             
             p2p.onError = (error) => {
-                console.error('P2P错误:', error);
+                console.error('❌ P2P错误:', error);
                 statusText.textContent = 'P2P连接失败，请尝试其他传输方式';
             };
             

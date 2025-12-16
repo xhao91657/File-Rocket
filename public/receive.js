@@ -626,10 +626,19 @@ function handleP2PData(data) {
             const timeDelta = (now - p2pLastProgressUpdate) / 1000;
             const bytesDelta = p2pTotalReceived - p2pLastReceivedBytes;
             
+            let instantSpeed = 0;
             if (timeDelta > 0) {
-                const instantSpeed = bytesDelta / timeDelta;
+                instantSpeed = bytesDelta / timeDelta;
                 downloadSpeed.textContent = `${formatFileSize(instantSpeed)}/s`;
             }
+            
+            // P2P模式下，向服务器发送进度和速度，同步给发送端
+            socket.emit('p2p-progress', {
+                pickupCode: currentPickupCode,
+                progress: progress,
+                bytesReceived: p2pTotalReceived,
+                speed: instantSpeed
+            });
             
             // 更新统计
             p2pLastProgressUpdate = now;
@@ -664,6 +673,14 @@ function completeP2PDownload() {
     a.click();
     document.body.removeChild(a);
     URL.revokeObjectURL(url);
+    
+    // 通知服务器和发送端：接收完成
+    socket.emit('p2p-complete', {
+        pickupCode: currentPickupCode,
+        totalBytes: blob.size
+    });
+    
+    console.log('📤 已通知发送端：文件接收完成');
     
     // 显示完成状态
     showStage('download-complete-stage');

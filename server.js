@@ -443,6 +443,50 @@ io.on('connection', (socket) => {
       }
     }
   });
+  
+  // P2P进度同步（接收端 → 服务器 → 发送端）
+  socket.on('p2p-progress', (data) => {
+    const { pickupCode, progress, bytesReceived, speed } = data;
+    const session = activeSessions.get(pickupCode);
+    
+    // 验证：只有接收端可以发送进度
+    if (session && session.receiverId === socket.id && session.senderSocket) {
+      // 转发给发送端
+      session.senderSocket.emit('p2p-progress', {
+        pickupCode,
+        progress,
+        bytesReceived,
+        speed
+      });
+    }
+  });
+  
+  // P2P传输完成通知（接收端 → 服务器 → 发送端）
+  socket.on('p2p-complete', (data) => {
+    const { pickupCode, totalBytes } = data;
+    const session = activeSessions.get(pickupCode);
+    
+    // 验证：只有接收端可以发送完成通知
+    if (session && session.receiverId === socket.id && session.senderSocket) {
+      console.log(`[${pickupCode}] P2P传输完成，总大小: ${totalBytes} bytes`);
+      
+      // 转发给发送端
+      session.senderSocket.emit('p2p-complete', {
+        pickupCode,
+        totalBytes
+      });
+      
+      // 更新统计
+      stats.todayTransfers++;
+      stats.totalTransfers++;
+      
+      // 延迟清理会话
+      setTimeout(() => {
+        activeSessions.delete(pickupCode);
+        console.log(`[${pickupCode}] P2P会话已清理`);
+      }, 5000);
+    }
+  });
 
   // 处理断开连接
   socket.on('disconnect', () => {
