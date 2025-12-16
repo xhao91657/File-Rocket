@@ -75,14 +75,21 @@ class P2PFileTransfer {
         this.socket.on('p2p-ice-candidate', this.candidateHandler);
     }
     
-    // 初始化P2P连接（发送方）
-    async initSender(pickupCode, file) {
+    // 初始化P2P连接（发送方）- 只检测NAT，不创建Offer
+    async initSenderNAT(pickupCode, file) {
         this.pickupCode = pickupCode;
         this.isSender = true;
         this.file = file;
         
         // 检测NAT类型
         await this.detectNATType();
+        
+        console.log('[P2P] 发送端NAT检测完成，等待接收端准备好...');
+    }
+    
+    // 创建并发送Offer（当接收端准备好时调用）
+    async createAndSendOffer() {
+        console.log('[P2P] 接收端已准备好，创建Offer');
         
         // 创建PeerConnection
         this.createPeerConnection();
@@ -110,8 +117,6 @@ class P2PFileTransfer {
             pickupCode: this.pickupCode,
             offer: offer
         });
-        
-        return this.natType;
     }
     
     // 初始化P2P连接（接收方）

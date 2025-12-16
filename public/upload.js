@@ -385,13 +385,15 @@ async function createP2PSession() {
             pickupCode = response.pickupCode;
             pickupCodeDisplay.textContent = pickupCode;
             
-            // 初始化P2P
+            // 初始化P2P（但不立即发送Offer）
             const p2p = new P2PFileTransfer(socket);
             window.currentP2P = p2p;
             
             // 检测NAT类型
             statusText.textContent = '正在检测网络环境...';
-            const senderNAT = await p2p.initSender(pickupCode, selectedFile);
+            // 使用新的方法：只检测NAT，不创建Offer
+            await p2p.initSenderNAT(pickupCode, selectedFile);
+            const senderNAT = p2p.natType;
             
             // 发送NAT信息到服务器
             socket.emit('p2p-nat-info', {
@@ -610,7 +612,7 @@ function setupSocketListeners() {
     });
     
     // P2P模式：接收端准备好了
-    socket.on('receiver-ready-p2p', (data) => {
+    socket.on('receiver-ready-p2p', async (data) => {
         const { pickupCode: readyPickupCode } = data;
         
         // 验证是否属于当前房间
@@ -619,9 +621,18 @@ function setupSocketListeners() {
             return;
         }
         
-        console.log(`[${pickupCode}] 接收端P2P已准备好，等待WebRTC连接建立...`);
+        console.log(`[${pickupCode}] 接收端P2P已准备好，开始创建Offer...`);
         statusText.textContent = '接收端已准备，正在建立P2P连接...';
-        // WebRTC连接会自动建立，数据通道打开后会触发onChannelOpen
+        
+        // 现在创建并发送Offer
+        if (window.currentP2P) {
+            try {
+                await window.currentP2P.createAndSendOffer();
+            } catch (error) {
+                console.error('[P2P] 创建Offer失败:', error);
+                statusText.textContent = 'P2P连接建立失败';
+            }
+        }
     });
     
     // 接收方下载完成确认
