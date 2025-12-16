@@ -192,7 +192,8 @@ function setupSocketListeners() {
     socket.on('file-info', async (fileInfo) => {
         const { pickupCode: infoPickupCode, name, size, type, mode } = fileInfo;
         
-        console.log('📥 [接收端] 收到file-info事件:', { pickupCode: infoPickupCode, mode, name, size });
+        console.log('📥 [接收端] 收到file-info事件 #' + (window.fileInfoCount = (window.fileInfoCount || 0) + 1), ':', { pickupCode: infoPickupCode, mode, name, size });
+        console.log('📥 [完整fileInfo]:', fileInfo);
         
         // 严格验证：只接收属于当前房间的文件信息
         if (infoPickupCode && infoPickupCode !== currentPickupCode) {
@@ -203,9 +204,10 @@ function setupSocketListeners() {
         expectedFileInfo = { name, size, type };
         
         console.log('🔍 [调试] mode值:', mode, '当前transferMode:', transferMode);
+        const oldMode = transferMode;
         transferMode = mode || transferMode || 'memory';
         
-        console.log('🔄 [接收端] 传输模式最终设置为:', transferMode);
+        console.log('🔄 [接收端] 传输模式从', oldMode, '变更为:', transferMode);
         
         // 如果是P2P模式，初始化P2P接收
         if (mode === 'p2p') {

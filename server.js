@@ -180,11 +180,12 @@ io.on('connection', (socket) => {
     
     // 如果文件信息已存在，立即发送给接收方（附带pickupCode）
     if (session.fileInfo) {
-      socket.emit('file-info', {
+      const dataToSend = {
         pickupCode: pickupCode,
         ...session.fileInfo
-      });
-      console.log(`[${pickupCode}] 向新加入的接收端发送文件信息`);
+      };
+      console.log(`[${pickupCode}] 向新加入的接收端发送文件信息:`, dataToSend);
+      socket.emit('file-info', dataToSend);
     }
     
     console.log(`[${pickupCode}] 接收方加入会话 (接收端: ${socket.id}, 发送端: ${session.senderId}) - 当前活跃会话: ${activeSessions.size}`);
@@ -204,11 +205,13 @@ io.on('connection', (socket) => {
       
       // 如果接收方已连接，发送文件信息（附带 pickupCode）
       if (session.receiverSocket) {
-        session.receiverSocket.emit('file-info', {
+        const dataToSend = {
           pickupCode: pickupCode,
           ...fileInfo
-        });
-        console.log(`[${pickupCode}] 向接收端发送文件信息`);
+        };
+        console.log(`[${pickupCode}] 准备向接收端发送文件信息:`, dataToSend);
+        session.receiverSocket.emit('file-info', dataToSend);
+        console.log(`[${pickupCode}] 文件信息已发送`);
       }
     } else {
       console.log(`[${pickupCode}] file-info验证失败`);
