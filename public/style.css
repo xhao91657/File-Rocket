@@ -751,9 +751,10 @@ body {
     }
     
     .btn-primary, .card-button {
-        padding: 16px 40px;
-        font-size: 1.1rem;
-        min-width: 200px;
+        width: 180px !important;
+        height: 56px !important;
+        padding: 0 !important;
+        font-size: 1.1rem !important;
     }
     
     .header h1 {
@@ -892,12 +893,12 @@ body {
     }
     
     .btn-primary, .card-button {
-        width: 100% !important;
-        max-width: 280px;
-        padding: 18px 20px;
-        font-size: 1.1rem;
+        width: 180px !important;
+        height: 56px !important;
+        padding: 0 !important;
+        font-size: 1.1rem !important;
         margin: 15px auto;
-        border-radius: 15px;
+        border-radius: 50px !important;
     }
     
     .send-btn, .receive-btn {
@@ -987,9 +988,11 @@ body {
     }
     
     .btn-primary, .card-button {
-        padding: 16px 18px;
-        font-size: 1rem;
-        border-radius: 12px;
+        width: 180px !important;
+        height: 56px !important;
+        padding: 0 !important;
+        font-size: 1rem !important;
+        border-radius: 50px !important;
     }
     
     .file-drop-zone {
