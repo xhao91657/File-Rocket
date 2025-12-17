@@ -560,9 +560,11 @@ function showStage(stageId) {
 let p2pReceivedData = [];
 let p2pMetadata = null;
 let p2pTotalReceived = 0; // 累计接收字节数
-let p2pLastProgressUpdate = 0; // 上次进度更新时间
+let p2pLastProgressUpdate = 0; // 上次UI更新时间
+let p2pLastSyncUpdate = 0; // 上次同步给发送端的时间
 let p2pLastReceivedBytes = 0; // 上次更新时的接收字节数
-const P2P_PROGRESS_UPDATE_INTERVAL = 100; // 进度更新间隔(ms)
+const P2P_PROGRESS_UPDATE_INTERVAL = 100; // UI进度更新间隔(ms)
+const P2P_SYNC_INTERVAL = 1000; // 同步给发送端的间隔(ms)
 
 function handleP2PData(data) {
     // 尝试解析为JSON（元数据或控制消息）
@@ -578,6 +580,7 @@ function handleP2PData(data) {
                 p2pReceivedData = []; // 清空之前的数据
                 p2pTotalReceived = 0;
                 p2pLastProgressUpdate = Date.now();
+                p2pLastSyncUpdate = Date.now();
                 p2pLastReceivedBytes = 0;
                 
                 // 切换到下载阶段
@@ -601,9 +604,10 @@ function handleP2PData(data) {
     
     // 接收文件数据块
     if (data instanceof ArrayBuffer) {
-        const chunk = new Uint8Array(data);
-        p2pReceivedData.push(chunk);
-        p2pTotalReceived += chunk.length;
+        // 直接保存 ArrayBuffer，不转换为 Uint8Array
+        // 这样在创建 Blob 时更高效且避免数据损坏
+        p2pReceivedData.push(data);
+        p2pTotalReceived += data.byteLength;
         
         // 对于大文件，定期触发下载以释放内存
         if (p2pMetadata && p2pMetadata.size > 100 * 1024 * 1024) { // >100MB
@@ -613,7 +617,7 @@ function handleP2PData(data) {
             }
         }
         
-        // 限制进度更新频率，避免UI卡顿
+        // 限制UI更新频率，避免卡顿
         const now = Date.now();
         if (p2pMetadata && p2pMetadata.size && 
             (now - p2pLastProgressUpdate >= P2P_PROGRESS_UPDATE_INTERVAL || 
@@ -632,17 +636,21 @@ function handleP2PData(data) {
                 downloadSpeed.textContent = `${formatFileSize(instantSpeed)}/s`;
             }
             
-            // P2P模式下，向服务器发送进度和速度，同步给发送端
-            socket.emit('p2p-progress', {
-                pickupCode: currentPickupCode,
-                progress: progress,
-                bytesReceived: p2pTotalReceived,
-                speed: instantSpeed
-            });
-            
             // 更新统计
             p2pLastProgressUpdate = now;
             p2pLastReceivedBytes = p2pTotalReceived;
+            
+            // P2P模式下，每1秒向服务器同步一次进度给发送端
+            if (now - p2pLastSyncUpdate >= P2P_SYNC_INTERVAL || p2pTotalReceived >= p2pMetadata.size) {
+                socket.emit('p2p-progress', {
+                    pickupCode: currentPickupCode,
+                    progress: progress,
+                    bytesReceived: p2pTotalReceived,
+                    speed: instantSpeed
+                });
+                p2pLastSyncUpdate = now;
+                console.log(`📤 [同步] 进度: ${progress.toFixed(1)}%, 速度: ${formatFileSize(instantSpeed)}/s`);
+            }
         }
     }
 }
@@ -654,17 +662,30 @@ function completeP2PDownload() {
         return;
     }
     
+    // 验证接收的数据大小是否匹配
+    if (p2pTotalReceived !== p2pMetadata.size) {
+        console.warn(`⚠️ 数据大小不匹配！期望: ${p2pMetadata.size}, 实际: ${p2pTotalReceived}`);
+    }
+    
     // 确保进度显示为100%
     updateDownloadProgress(100);
     
-    console.log(`📦 开始创建Blob，共 ${p2pReceivedData.length} 个数据块...`);
+    console.log(`📦 开始创建Blob，共 ${p2pReceivedData.length} 个数据块，总大小: ${formatFileSize(p2pTotalReceived)}`);
     
-    // 直接使用数组创建Blob（更高效，不需要手动合并）
+    // 直接使用 ArrayBuffer 数组创建 Blob
     const blob = new Blob(p2pReceivedData, { 
         type: p2pMetadata.mimeType || 'application/octet-stream' 
     });
     
-    console.log(`✅ Blob创建成功，大小: ${formatFileSize(blob.size)}`);
+    console.log(`✅ Blob创建成功，大小: ${formatFileSize(blob.size)} (期望: ${formatFileSize(p2pMetadata.size)})`);
+    
+    // 最终验证
+    if (blob.size !== p2pMetadata.size) {
+        console.error(`❌ 文件大小验证失败！Blob: ${blob.size}, 期望: ${p2pMetadata.size}`);
+        showError(`文件接收不完整：${formatFileSize(blob.size)} / ${formatFileSize(p2pMetadata.size)}`);
+        return;
+    }
+    
     const url = URL.createObjectURL(blob);
     const a = document.createElement('a');
     a.href = url;
@@ -690,6 +711,7 @@ function completeP2PDownload() {
     p2pMetadata = null;
     p2pTotalReceived = 0;
     p2pLastProgressUpdate = 0;
+    p2pLastSyncUpdate = 0;
     p2pLastReceivedBytes = 0;
     isDownloading = false;
     
