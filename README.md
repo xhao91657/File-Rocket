@@ -14,7 +14,8 @@
 **[https://file-rocket.top/](https://file-rocket.top/)** - 立即体验，无需安装（仅作演示 推荐个人部署）  
 **[https://file-rocket.tech/](https://file-rocket.tech/)** - 备用地址，速度更快（仅作演示 推荐个人部署）
 
-<img width="2552" height="1314" alt="FR" src="https://github.com/user-attachments/assets/4144584b-ca15-4e6c-b810-7cd729ddd7a9" />
+<img width="2560" height="1351" alt="FR4 0" src="https://github.com/user-attachments/assets/00fb127d-73a7-43b1-a891-0443c5b8fb68" />
+
 
 *© 2025 File-Rocket 4.0 • Designed for Speed*
 
@@ -45,6 +46,9 @@
   - 💻 **桌面设备**：StreamSaver流式传输，边收边存，支持超大文件（>10GB）
   - 📱 **移动设备**：浏览器缓存模式，传输完成后统一下载（推荐<500MB）
 
+<img width="2560" height="1351" alt="UP" src="https://github.com/user-attachments/assets/5c6a5fbc-1ddb-452e-9768-3839af337a69" />
+
+
 ### 🔐 强大的管理员系统
 
 - **隐藏式入口**：首页版权文字点击 4 次触发
@@ -54,6 +58,9 @@
 - **删除策略**：1小时/24小时/下载后删除/永久保存
 - **系统统计**：活跃会话、今日传输、文件数量
 - **安全设置**：修改管理员密码、Token 会话管理
+
+<img width="737" height="1316" alt="dashboard" src="https://github.com/user-attachments/assets/29cd3ef2-4e85-429e-8e50-a696ccb56fbe" />
+
 
 ### 🌐 全平台支持
 
