@@ -80,26 +80,14 @@ Docker 安装及配置教程：[哩虎的技术博客 - Docker 安装及配置](
 根据您的设备类型选择命令：
 
 #### 🏠 ARM64 设备（OpenWrt / 树莓派 / 电视盒子）
-```bash
-docker run -d \
-  --name file-rocket \
-  --restart unless-stopped \
-  -p 3000:3000 \
-  --memory=128m \
-  --cpus=0.3 \
-  -v ./files:/app/files \
-  lihupr/file-rocket:arm64
 ```
-视频教程制作中...
+docker run -d --name file-rocket --restart unless-stopped -p 3000:3000 --memory=128m --cpus=0.3 lihupr/file-rocket:arm64
+```
+视频教程：[ARM64 平台部署视频教程](https://b23.tv/mgSF3vi)
 
 #### 💻 AMD64 设备（Windows / Linux PC / 云服务器）
-```bash
-docker run -d \
-  --name file-rocket \
-  --restart unless-stopped \
-  -p 3000:3000 \
-  -v ./files:/app/files \
-  lihupr/file-rocket:latest
+```
+docker run -d --name file-rocket --restart unless-stopped -p 3000:3000 lihupr/file-rocket:latest
 ```
 视频教程：[AMD64 平台部署视频教程](https://b23.tv/nlUlzcT)
 
