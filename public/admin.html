@@ -506,6 +506,10 @@
                             <input type="radio" name="retentionMode" value="download" style="margin-right: 10px;">
                             <span>接收端下载完成就删除</span>
                         </label>
+                        <label style="display: flex; align-items: center; cursor: pointer;">
+                            <input type="radio" name="retentionMode" value="never" style="margin-right: 10px;">
+                            <span>永久保存，不自动删除</span>
+                        </label>
                     </div>
                 </div>
                 
@@ -654,9 +658,12 @@
                 // 设置文件保留模式
                 if (data.storageConfig) {
                     const deleteOnDownload = data.storageConfig.deleteOnDownload || false;
+                    const neverDelete = data.storageConfig.neverDelete || false;
                     const hours = data.storageConfig.fileRetentionHours || 24;
                     
-                    if (deleteOnDownload) {
+                    if (neverDelete) {
+                        document.querySelector('input[name="retentionMode"][value="never"]').checked = true;
+                    } else if (deleteOnDownload) {
                         document.querySelector('input[name="retentionMode"][value="download"]').checked = true;
                     } else if (hours === 1) {
                         document.querySelector('input[name="retentionMode"][value="1"]').checked = true;
@@ -738,12 +745,16 @@
                 const value = e.target.value;
                 let hours = 24;
                 let deleteOnDownload = false;
+                let neverDelete = false;
                 
                 if (value === '1') {
                     hours = 1;
                 } else if (value === 'download') {
                     hours = 24; // 默认24小时作为备份
                     deleteOnDownload = true;
+                } else if (value === 'never') {
+                    hours = 24; // 默认24小时作为备份
+                    neverDelete = true;
                 }
                 
                 try {
@@ -755,7 +766,8 @@
                         },
                         body: JSON.stringify({
                             fileRetentionHours: hours,
-                            deleteOnDownload: deleteOnDownload
+                            deleteOnDownload: deleteOnDownload,
+                            neverDelete: neverDelete
                         })
                     });
                     
@@ -899,12 +911,21 @@
                 } else {
                     tbody.innerHTML = data.files.map(file => {
                         const uploadTime = formatTime(file.uploadTime);
-                        const deleteMode = file.deleteMode === 'download' ? '下载后删除' : `${file.deleteTime ? formatTime(file.deleteTime) : '未知'}`;
-                        const remainingTime = file.deleteMode === 'download' 
-                            ? '<span class="download-mode">等待下载</span>'
-                            : file.remainingMs > 0 
-                                ? `<span class="remaining-time ${file.remainingMs < 3600000 ? 'urgent' : ''}">${formatRemainingTime(file.remainingMs)}</span>`
-                                : '<span class="remaining-time urgent">已过期</span>';
+                        let deleteMode = '未知';
+                        let remainingTime = '<span class="remaining-time urgent">已过期</span>';
+                        
+                        if (file.deleteMode === 'never') {
+                            deleteMode = '永久保存';
+                            remainingTime = '<span class="download-mode">永久有效</span>';
+                        } else if (file.deleteMode === 'download') {
+                            deleteMode = '下载后删除';
+                            remainingTime = '<span class="download-mode">等待下载</span>';
+                        } else if (file.deleteMode === 'timer') {
+                            deleteMode = file.deleteTime ? formatTime(file.deleteTime) : '未知';
+                            if (file.remainingMs > 0) {
+                                remainingTime = `<span class="remaining-time ${file.remainingMs < 3600000 ? 'urgent' : ''}">${formatRemainingTime(file.remainingMs)}</span>`;
+                            }
+                        }
                         
                         return `
                             <tr>

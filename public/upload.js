@@ -143,7 +143,9 @@ function updateStorageDescription() {
     const storageModeDesc = document.getElementById('storageModeDesc');
     if (!storageModeDesc) return;
     
-    if (storageConfig.deleteOnDownload) {
+    if (storageConfig.neverDelete) {
+        storageModeDesc.textContent = '文件永久保存在服务器，支持异步下载';
+    } else if (storageConfig.deleteOnDownload) {
         storageModeDesc.textContent = '文件暂存服务器，接收方下载后立即删除';
     } else {
         const hours = storageConfig.fileRetentionHours || 24;
@@ -158,7 +160,9 @@ function updateCodeHint() {
     
     if (transferMode === 'storage') {
         // 服务器存储模式：根据配置显示有效期
-        if (storageConfig.deleteOnDownload) {
+        if (storageConfig.neverDelete) {
+            codeHint.textContent = '请将此码分享给接收方 (文件永久有效)';
+        } else if (storageConfig.deleteOnDownload) {
             codeHint.textContent = '请将此码分享给接收方 (下载后文件自动删除)';
         } else {
             const hours = storageConfig.fileRetentionHours || 24;
@@ -311,7 +315,9 @@ async function uploadFileToServer() {
                         
                         // 更新状态文本 - 显示文件保留时间
                         let statusMessage = '文件已上传到服务器';
-                        if (data.deleteOnDownload) {
+                        if (data.neverDelete) {
+                            statusMessage += '，文件永久保存';
+                        } else if (data.deleteOnDownload) {
                             statusMessage += '，接收方下载后自动删除';
                         } else {
                             const retentionHours = data.retentionHours || 24;

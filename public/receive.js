@@ -361,33 +361,94 @@ function acceptTransfer() {
 }
 
 // 下载服务器存储的文件
-function downloadStoredFile() {
+async function downloadStoredFile() {
     const downloadUrl = `/api/download-stored/${currentPickupCode}`;
     
-    // 创建隐藏的下载链接
-    const a = document.createElement('a');
-    a.href = downloadUrl;
-    a.download = expectedFileInfo.name;
-    a.style.display = 'none';
-    document.body.appendChild(a);
-    a.click();
-    document.body.removeChild(a);
+    console.log(`[${currentPickupCode}] 开始从服务器下载文件`);
     
-    console.log(`[${currentPickupCode}] 服务器存储模式下载已触发`);
+    // 重置进度
+    updateDownloadProgress(0);
+    isDownloading = true;
+    downloadStartTime = Date.now();
+    totalBytesReceived = 0;
     
-    // 模拟进度（因为浏览器下载无法获取实时进度）
-    let progress = 0;
-    const progressInterval = setInterval(() => {
-        progress += 10;
-        updateDownloadProgress(progress);
+    try {
+        // 使用 fetch 下载文件以获取进度
+        const response = await fetch(downloadUrl);
         
-        if (progress >= 100) {
-            clearInterval(progressInterval);
-            setTimeout(() => {
-                showStage('download-complete-stage');
-            }, 500);
+        if (!response.ok) {
+            throw new Error(`下载失败: ${response.status} ${response.statusText}`);
         }
-    }, 500);
+        
+        // 获取文件总大小
+        const contentLength = response.headers.get('Content-Length');
+        const totalSize = contentLength ? parseInt(contentLength) : expectedFileInfo.size;
+        
+        console.log(`[${currentPickupCode}] 文件总大小: ${formatFileSize(totalSize)}`);
+        
+        // 读取响应流（优化：减少进度更新频率）
+        const reader = response.body.getReader();
+        const chunks = [];
+        let lastProgressUpdate = Date.now();
+        const PROGRESS_UPDATE_INTERVAL = 100; // 每100ms更新一次进度
+        
+        while (true) {
+            const { done, value } = await reader.read();
+            
+            if (done) {
+                break;
+            }
+            
+            // 保存数据块
+            chunks.push(value);
+            totalBytesReceived += value.length;
+            
+            // 限制进度更新频率，减少 DOM 操作
+            const now = Date.now();
+            if (now - lastProgressUpdate >= PROGRESS_UPDATE_INTERVAL || totalBytesReceived >= totalSize) {
+                // 更新进度
+                const progress = (totalBytesReceived / totalSize) * 100;
+                updateDownloadProgress(progress);
+                
+                // 计算速度
+                const elapsed = (now - downloadStartTime) / 1000;
+                if (elapsed > 0) {
+                    const speed = totalBytesReceived / elapsed;
+                    downloadSpeed.textContent = `${formatFileSize(speed)}/s`;
+                }
+                
+                lastProgressUpdate = now;
+            }
+        }
+        
+        console.log(`[${currentPickupCode}] 文件下载完成，开始保存...`);
+        
+        // 合并所有数据块
+        const blob = new Blob(chunks, { type: expectedFileInfo.type || 'application/octet-stream' });
+        
+        // 触发下载
+        const url = URL.createObjectURL(blob);
+        const a = document.createElement('a');
+        a.href = url;
+        a.download = expectedFileInfo.name;
+        document.body.appendChild(a);
+        a.click();
+        document.body.removeChild(a);
+        URL.revokeObjectURL(url);
+        
+        console.log(`[${currentPickupCode}] 文件已保存`);
+        
+        // 显示完成状态
+        setTimeout(() => {
+            showStage('download-complete-stage');
+            isDownloading = false;
+        }, 500);
+        
+    } catch (error) {
+        console.error(`[${currentPickupCode}] 下载失败:`, error);
+        showError('文件下载失败: ' + error.message);
+        isDownloading = false;
+    }
 }
 
 // 下载内存流式文件
@@ -909,16 +970,16 @@ async function completeP2PDownload() {
             
             // 移动设备上，先显示一个提示，让用户知道即将下载
             // 某些移动浏览器需要用户交互才能触发下载
-            document.body.appendChild(a);
+        document.body.appendChild(a);
             
             // 使用 setTimeout 确保 DOM 更新完成
             setTimeout(() => {
-                a.click();
+        a.click();
                 
                 // 延迟清理，确保下载已触发
                 setTimeout(() => {
-                    document.body.removeChild(a);
-                    URL.revokeObjectURL(url);
+        document.body.removeChild(a);
+        URL.revokeObjectURL(url);
                     console.log('📱 移动设备：下载已触发，资源已清理');
                 }, 1000);
             }, 100);

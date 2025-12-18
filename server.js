@@ -9,8 +9,24 @@ const adminMiddleware = require('./admin-middleware');
 const RateLimiter = require('./rate-limiter');
 
 const app = express();
+
+// 性能优化：禁用 X-Powered-By 头
+app.disable('x-powered-by');
+
+// 性能优化：启用 ETag
+app.set('etag', 'strong');
+
 const server = http.createServer(app);
 server.setTimeout(0); // 禁用超时，确保大文件传输不断开
+
+// 性能优化：增加服务器最大连接数
+server.maxConnections = 1000;
+
+// 性能优化：禁用 Nagle 算法
+server.on('connection', (socket) => {
+  socket.setNoDelay(true);
+  socket.setKeepAlive(true, 60000);
+});
 
 const io = socketIo(server, {
   cors: {
@@ -54,7 +70,8 @@ if (config && config.storageConfig) {
 
 // 配置静态文件服务
 app.use(express.static('public'));
-app.use(express.json());
+app.use(express.json({ limit: '50mb' })); // 增加JSON请求体大小限制
+app.use(express.urlencoded({ limit: '50mb', extended: true })); // 增加URL编码请求体大小限制
 
 // 配置 Multer 用于文件上传
 const storage = multer.diskStorage({
@@ -69,15 +86,98 @@ const storage = multer.diskStorage({
   }
 });
 
+// 动态获取文件大小限制（基于磁盘剩余空间的90%）
+function getMaxFileSize() {
+  try {
+    const config = adminMiddleware.loadConfig();
+    const uploadDir = path.resolve(config.storageConfig.uploadDir);
+    
+    if (!fs.existsSync(uploadDir)) {
+      fs.mkdirSync(uploadDir, { recursive: true });
+    }
+    
+    const { execSync } = require('child_process');
+    
+    try {
+      // 使用 df 命令获取可用空间（字节）
+      let dfOutput = '';
+      try {
+        dfOutput = execSync(`df -B1 "${uploadDir}"`, { 
+          encoding: 'utf8',
+          shell: '/bin/sh',
+          timeout: 5000
+        }).toString();
+      } catch (dfError) {
+        dfOutput = execSync(`df -k "${uploadDir}"`, { 
+          encoding: 'utf8',
+          shell: '/bin/sh',
+          timeout: 5000
+        }).toString();
+      }
+      
+      const lines = dfOutput.trim().split('\n');
+      if (lines.length >= 2) {
+        let dataLine = lines[1].trim();
+        if (lines.length >= 3 && dataLine.match(/^\/\w+/) && !dataLine.match(/\d/)) {
+          dataLine = lines[2].trim();
+        }
+        
+        const parts = dataLine.split(/\s+/);
+        let sizeIndex = -1;
+        for (let i = 0; i < parts.length; i++) {
+          if (parts[i].match(/^\d+$/)) {
+            sizeIndex = i;
+            break;
+          }
+        }
+        
+        if (sizeIndex >= 0 && parts.length >= sizeIndex + 3) {
+          let availBytes = parseInt(parts[sizeIndex + 2]) || 0;
+          
+          // 如果使用 -k 参数，需要转换为字节
+          if (!dfOutput.includes('-B1')) {
+            availBytes *= 1024;
+          }
+          
+          // 返回可用空间的90%
+          const maxSize = Math.floor(availBytes * 0.9);
+          console.log(`[文件上传限制] 磁盘可用: ${(availBytes / 1024 / 1024 / 1024).toFixed(2)} GB, 最大上传: ${(maxSize / 1024 / 1024 / 1024).toFixed(2)} GB (90%)`);
+          return maxSize;
+        }
+      }
+    } catch (error) {
+      console.warn('[文件上传限制] 无法获取磁盘空间，使用默认限制 10GB');
+    }
+  } catch (error) {
+    console.warn('[文件上传限制] 配置加载失败，使用默认限制 10GB');
+  }
+  
+  // 默认 10GB
+  return 10 * 1024 * 1024 * 1024;
+}
+
 const upload = multer({ 
   storage: storage,
   fileFilter: (req, file, cb) => {
     // 记录上传开始时间
     req.uploadStartTime = Date.now();
+    
+    // 修复中文文件名编码问题
+    try {
+      file.originalname = Buffer.from(file.originalname, 'latin1').toString('utf8');
+    } catch (error) {
+      console.warn('[文件上传] 文件名编码转换失败:', error);
+    }
+    
+    // 动态检查文件大小限制
+    const maxSize = getMaxFileSize();
+    req.maxFileSize = maxSize;
+    
     cb(null, true);
   },
   limits: {
-    fileSize: 10 * 1024 * 1024 * 1024 // 10GB 限制
+    fileSize: 100 * 1024 * 1024 * 1024, // 临时设置为100GB，实际限制在fileFilter中检查
+    fieldSize: 100 * 1024 * 1024 // 100MB 字段大小
   }
 });
 
@@ -612,7 +712,7 @@ app.get('/api/admin/config', adminMiddleware.requireAdmin, (req, res) => {
 
 // 更新存储配置
 app.put('/api/admin/storage-config', adminMiddleware.requireAdmin, (req, res) => {
-  const { fileRetentionHours, deleteOnDownload } = req.body;
+  const { fileRetentionHours, deleteOnDownload, neverDelete } = req.body;
   
   const config = adminMiddleware.loadConfig();
   if (!config) {
@@ -625,6 +725,10 @@ app.put('/api/admin/storage-config', adminMiddleware.requireAdmin, (req, res) =>
   
   if (deleteOnDownload !== undefined) {
     config.storageConfig.deleteOnDownload = deleteOnDownload;
+  }
+  
+  if (neverDelete !== undefined) {
+    config.storageConfig.neverDelete = neverDelete;
   }
   
   if (adminMiddleware.saveConfig(config)) {
@@ -758,6 +862,7 @@ app.get('/api/admin/files', adminMiddleware.requireAdmin, (req, res) => {
     const currentConfig = adminMiddleware.loadConfig();
     const retentionHours = currentConfig.storageConfig.fileRetentionHours || 24;
     const deleteOnDownload = currentConfig.storageConfig.deleteOnDownload || false;
+    const neverDelete = currentConfig.storageConfig.neverDelete || false;
     
     // 遍历存储的会话信息
     for (const [pickupCode, fileInfo] of storedFileSessions.entries()) {
@@ -774,15 +879,23 @@ app.get('/api/admin/files', adminMiddleware.requireAdmin, (req, res) => {
           // 计算删除时间和剩余时间
           let deleteTime = null;
           let remainingMs = null;
+          let deleteMode = 'timer';
           
-          if (deleteOnDownload) {
+          if (neverDelete) {
+            // 永不删除模式
+            deleteTime = null;
+            remainingMs = null;
+            deleteMode = 'never';
+          } else if (deleteOnDownload) {
             // 下载后删除模式
             deleteTime = null;
             remainingMs = null;
+            deleteMode = 'download';
           } else {
             // 定时删除模式
             deleteTime = uploadTime + (retentionHours * 60 * 60 * 1000);
             remainingMs = Math.max(0, deleteTime - Date.now());
+            deleteMode = 'timer';
           }
           
           // 获取实际文件大小（以防万一与记录不符）
@@ -797,7 +910,7 @@ app.get('/api/admin/files', adminMiddleware.requireAdmin, (req, res) => {
             uploadTime: uploadTime,
             deleteTime: deleteTime,
             remainingMs: remainingMs,
-            deleteMode: deleteOnDownload ? 'download' : 'timer',
+            deleteMode: deleteMode,
             downloaded: fileInfo.downloaded || false,
             retentionHours: retentionHours
           });
@@ -1010,11 +1123,26 @@ app.post('/api/upload-file', upload.single('file'), (req, res) => {
     return res.status(400).json({ success: false, message: '未选择文件' });
   }
   
+  // 检查文件大小是否超过动态限制
+  const maxSize = req.maxFileSize || getMaxFileSize();
+  if (req.file.size > maxSize) {
+    // 删除已上传的文件
+    fs.unlink(req.file.path, (err) => {
+      if (err) console.error('[上传] 删除超大文件失败:', err);
+    });
+    
+    return res.status(413).json({ 
+      success: false, 
+      message: `文件过大，最大允许 ${(maxSize / 1024 / 1024 / 1024).toFixed(2)} GB (服务器可用空间的90%)` 
+    });
+  }
+  
   const pickupCode = generatePickupCode();
+  
   const fileInfo = {
     pickupCode: pickupCode,
     filename: req.file.filename,
-    originalName: req.file.originalname,
+    originalName: req.file.originalname, // 已在 fileFilter 中处理编码
     size: req.file.size,
     mimetype: req.file.mimetype,
     uploadTime: Date.now(),
@@ -1027,21 +1155,30 @@ app.post('/api/upload-file', upload.single('file'), (req, res) => {
   const currentConfig = adminMiddleware.loadConfig();
   const retentionHours = currentConfig.storageConfig.fileRetentionHours || 24;
   const deleteOnDownload = currentConfig.storageConfig.deleteOnDownload || false;
+  const neverDelete = currentConfig.storageConfig.neverDelete || false;
   
-  // 设置文件过期清理（如果不是下载后删除模式）
-  if (!deleteOnDownload) {
+  // 设置文件过期清理（如果不是下载后删除模式且不是永不删除模式）
+  if (!deleteOnDownload && !neverDelete) {
     setTimeout(() => {
       deleteStoredFile(pickupCode);
     }, retentionHours * 60 * 60 * 1000);
   }
   
-  console.log(`[服务器存储] 文件已上传: ${pickupCode} - ${req.file.originalname} (保留${deleteOnDownload ? '下载后删除' : retentionHours + '小时'})`);
+  let retentionMsg = '永久保存';
+  if (deleteOnDownload) {
+    retentionMsg = '下载后删除';
+  } else if (!neverDelete) {
+    retentionMsg = retentionHours + '小时';
+  }
+  
+  console.log(`[服务器存储] 文件已上传: ${pickupCode} - ${req.file.originalname} (保留${retentionMsg})`);
   
   res.json({
     success: true,
     pickupCode: pickupCode,
-    retentionHours: deleteOnDownload ? '下载后删除' : retentionHours,
+    retentionHours: retentionMsg,
     deleteOnDownload: deleteOnDownload,
+    neverDelete: neverDelete,
     fileInfo: {
       name: req.file.originalname,
       size: req.file.size,
@@ -1089,7 +1226,7 @@ app.get('/api/download-stored/:code', (req, res) => {
     return res.status(404).send('文件不存在');
   }
   
-  // 设置下载头
+  // 设置下载头（优化性能和中文支持）
   const fileName = encodeURIComponent(fileInfo.originalName);
   res.setHeader('Content-Disposition', `attachment; filename="${fileName}"; filename*=UTF-8''${fileName}`);
   res.setHeader('Content-Type', fileInfo.mimetype || 'application/octet-stream');
@@ -1098,36 +1235,77 @@ app.get('/api/download-stored/:code', (req, res) => {
   res.setHeader('X-Content-Type-Options', 'nosniff'); // 安全头
   res.setHeader('Accept-Ranges', 'bytes'); // 支持断点续传
   
-  // 流式发送文件（优化缓冲区大小）
+  // 性能优化：禁用 Nagle 算法，减少延迟
+  if (req.socket) {
+    req.socket.setNoDelay(true);
+  }
+  
+  // 性能优化：增加 TCP 发送缓冲区
+  if (req.socket && req.socket.bufferSize !== undefined) {
+    req.socket.setKeepAlive(true, 60000); // 保持连接活跃
+  }
+  
+  // 流式发送文件（优化缓冲区大小以跑满带宽）
+  // 对于 500Mbps (62.5MB/s) 带宽，使用 8MB 缓冲区
+  // 对于 200Mbps (25MB/s) 带宽，使用 4MB 缓冲区
   const fileStream = fs.createReadStream(filePath, {
-    highWaterMark: 512 * 1024 // 512KB缓冲区，提升读取速度
+    highWaterMark: 8 * 1024 * 1024 // 8MB缓冲区，适合高带宽场景
+  });
+  
+  // 跟踪下载进度
+  let bytesTransferred = 0;
+  const startTime = Date.now();
+  
+  fileStream.on('data', (chunk) => {
+    bytesTransferred += chunk.length;
+    
+    // 每传输一定量数据后更新进度（避免过于频繁）
+    if (bytesTransferred % (1024 * 1024) < chunk.length || bytesTransferred === fileInfo.size) {
+      const progress = (bytesTransferred / fileInfo.size) * 100;
+      const elapsed = (Date.now() - startTime) / 1000;
+      const speed = elapsed > 0 ? bytesTransferred / elapsed : 0;
+      
+      console.log(`[服务器存储] ${pickupCode} 下载进度: ${progress.toFixed(1)}%, 速度: ${(speed / 1024 / 1024).toFixed(2)} MB/s`);
+    }
   });
   
   fileStream.on('end', () => {
-    console.log(`[服务器存储] 文件已下载: ${pickupCode}`);
+    const elapsed = (Date.now() - startTime) / 1000;
+    const avgSpeed = elapsed > 0 ? bytesTransferred / elapsed : 0;
+    console.log(`[服务器存储] 文件已下载完成: ${pickupCode}, 总大小: ${(bytesTransferred / 1024 / 1024).toFixed(2)} MB, 平均速度: ${(avgSpeed / 1024 / 1024).toFixed(2)} MB/s`);
+    
     fileInfo.downloaded = true;
     
     // 检查是否设置为下载后删除
     const currentConfig = adminMiddleware.loadConfig();
     const deleteOnDownload = currentConfig.storageConfig.deleteOnDownload || false;
+    const neverDelete = currentConfig.storageConfig.neverDelete || false;
     
-    if (deleteOnDownload) {
+    if (neverDelete) {
+      // 永不删除模式
+      console.log(`[服务器存储] 配置为永不删除，保留文件: ${pickupCode}`);
+    } else if (deleteOnDownload) {
       // 立即删除文件
       console.log(`[服务器存储] 配置为下载后删除，立即清理文件: ${pickupCode}`);
       setTimeout(() => {
         deleteStoredFile(pickupCode);
       }, 2000);
-    } else {
-      // 5秒后删除（保持原有逻辑）
-      setTimeout(() => {
-        deleteStoredFile(pickupCode);
-      }, 5000);
     }
   });
   
   fileStream.on('error', (error) => {
     console.error(`[服务器存储] 文件读取错误:`, error);
-    res.status(500).send('文件读取失败');
+    if (!res.headersSent) {
+      res.status(500).send('文件读取失败');
+    }
+  });
+  
+  // 监听客户端断开连接
+  req.on('close', () => {
+    if (bytesTransferred < fileInfo.size) {
+      console.log(`[服务器存储] ${pickupCode} 下载中断，已传输: ${(bytesTransferred / 1024 / 1024).toFixed(2)} MB / ${(fileInfo.size / 1024 / 1024).toFixed(2)} MB`);
+      fileStream.destroy();
+    }
   });
   
   fileStream.pipe(res);
@@ -1210,9 +1388,10 @@ setInterval(() => {
   if (config && config.features.serverStorage) {
     const retentionHours = config.storageConfig.fileRetentionHours || 24;
     const deleteOnDownload = config.storageConfig.deleteOnDownload || false;
+    const neverDelete = config.storageConfig.neverDelete || false;
     
-    // 如果不是"下载后删除"模式，才进行定时清理
-    if (!deleteOnDownload) {
+    // 如果不是"下载后删除"模式且不是"永不删除"模式，才进行定时清理
+    if (!deleteOnDownload && !neverDelete) {
       for (const [pickupCode, fileInfo] of storedFileSessions.entries()) {
         const uploadTime = fileInfo.uploadTime || Date.now();
         const fileAge = now - uploadTime;
